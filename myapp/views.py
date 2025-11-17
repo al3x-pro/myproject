@@ -1,6 +1,6 @@
-from django.shortcuts import render
-from .models import Entry
-from .forms import EntryForm
+from django.shortcuts import redirect, render
+from .models import Entry, Comment
+from .forms import EntryForm, CommentForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -11,12 +11,14 @@ class EntryListView(LoginRequiredMixin, ListView):
     model = Entry
     template_name = 'myapp/index.html'
     context_object_name = 'entries'
-    paginate_by = 10
 
     def get_queryset(self):
         qs = super().get_queryset()
-        qs = qs.filter(author=self.request.user).order_by('-created_at')
+
+        qs = qs.filter(author=self.request.user)
+
         category = self.request.GET.get("category")
+
         if category:                     
             qs = qs.filter(category=category)
 
@@ -48,6 +50,8 @@ class EntryListView(LoginRequiredMixin, ListView):
 
         counts = Entry.objects.values('category').annotate(count=Count('category'))
 
+        comments = Comment.objects.order_by('created_at')[:3]
+
         category_data = []
         for item in counts:
             cat_key = item['category']
@@ -63,7 +67,7 @@ class EntryListView(LoginRequiredMixin, ListView):
 
         context['category_data'] = category_data
         context["active_category"] = self.request.GET.get("category")
-
+        context['comments'] = comments
         return context
 
 
@@ -72,7 +76,37 @@ class EntryDetailView(DetailView):
     model = Entry
     template_name = 'myapp/detail.html'
     context_object_name = 'entry'
+    
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        entry = self.object
 
+        context["comments"] = entry.comments.filter(parent__isnull=True)
+        context["comment_form"] = CommentForm()
+        return context
+    
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = CommentForm(request.POST)
+
+        if form.is_valid():
+            comment = Comment(
+                entry=self.object,
+                author=request.user,
+                text=form.cleaned_data["text"],
+            )
+
+            # Handle reply to another comment
+            parent_id = form.cleaned_data.get("parent_id")
+            if parent_id:
+                comment.parent_id = parent_id
+
+            comment.save()
+            return redirect(self.object.get_absolute_url())
+
+        context = self.get_context_data(comment_form=form)
+        return self.render_to_response(context)
+    
 
 class EntryCreateView(CreateView):
     model = Entry
