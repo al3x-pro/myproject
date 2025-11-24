@@ -9,7 +9,7 @@ from django.db.models import Count
 
 class EntryListView(LoginRequiredMixin, ListView):
     model = Entry
-    template_name = 'myapp/index.html'
+    template_name = 'base/base.html'
     context_object_name = 'entries'
 
     def get_queryset(self):
