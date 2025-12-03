@@ -1,22 +1,33 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.template.defaultfilters import slugify
 
 User = get_user_model()
 
-class Entry(models.Model):
-    class Category(models.TextChoices):
-        LEARNING = 'LE', 'Learning'
-        LIFESTYLE = 'LI', 'Lifestyle'
-        MEAL = 'ME', 'Meal'
 
+class Category(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    slug = models.SlugField(default="", max_length=100, unique=True)
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
+class Entry(models.Model):
     title = models.CharField(max_length=200)
-    category = models.CharField(max_length=2, choices=Category.choices,
-         default=Category.LIFESTYLE)
+    category = models.ForeignKey(Category, on_delete=models.SET_NULL, null=True,
+                                 related_name='entries')
     text = models.TextField()
     author = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    views = models.PositiveIntegerField(default=0)
 
     class Meta:
         ordering = ["-created_at"]

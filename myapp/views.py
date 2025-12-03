@@ -1,10 +1,11 @@
 from django.shortcuts import redirect, render
-from .models import Entry, Comment
+from .models import Entry, Comment, Category
 from .forms import EntryForm, CommentForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count
+from django.db.models import Count, F
+from django.core.paginator import Paginator
 
 
 class EntryListView(LoginRequiredMixin, ListView):
@@ -12,62 +13,11 @@ class EntryListView(LoginRequiredMixin, ListView):
     template_name = 'base/base.html'
     context_object_name = 'entries'
 
-    def get_queryset(self):
-        qs = super().get_queryset()
-
-        qs = qs.filter(author=self.request.user)
-
-        category = self.request.GET.get("category")
-
-        if category:                     
-            qs = qs.filter(category=category)
-
-        return qs
-
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-
-        category_info = {
-            'LI': {
-                'name': 'Lifestyle',
-                'icon': 'fa-solid fa-person-walking fa-3x mb-3',
-                'gradient': 'linear-gradient(45deg, #e74c3c, #c0392b)',
-                'description': 'Personal experiences and life tips'
-            },
-            'ME': {
-                'name': 'Meal',
-                'icon': 'fa-solid fa-egg fa-3x mb-3',
-                'gradient': 'linear-gradient(45deg, #27ae60, #229954)',
-                'description': 'A time for nourishment and connection'
-            },
-            'LE': {
-                'name': 'Learning',
-                'icon': 'fa-solid fa-laptop-code fa-3x mb-3',
-                'gradient': 'linear-gradient(45deg, #3498db, #2980b9)',
-                'description': 'The pursuit of understanding and knowledge'
-            },
-        }
-
-        counts = Entry.objects.values('category').annotate(count=Count('category'))
-
-        comments = Comment.objects.order_by('-created_at')[:3]
-
-        category_data = []
-        for item in counts:
-            cat_key = item['category']
-            info = category_info.get(cat_key, {})
-            category_data.append({
-                'key': cat_key,
-                'name': dict(Entry.Category.choices).get(cat_key, 'Unknown'),
-                'count': item['count'],
-                'icon': info.get('icon', 'fa-folder'),
-                'gradient': info.get('gradient', 'linear-gradient(45deg, #95a5a6, #7f8c8d)'),
-                'description': info.get('description', 'Explore this category')
-            })
-
-        context['category_data'] = category_data
-        context["active_category"] = self.request.GET.get("category")
-        context['comments'] = comments
+        context['categories'] = Category.objects.annotate(entry_count=Count('entries'))
+        context['comments'] = Comment.objects.all()
+        context['users_count'] = Entry.objects.values('author').distinct().count()
         return context
 
 
@@ -79,32 +29,53 @@ class EntryDetailView(DetailView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        entry = self.object
 
-        context["comments"] = entry.comments.filter(parent__isnull=True)
+        comment_list = Comment.objects.filter(
+            entry=self.object,
+            parent__isnull=True
+            ).order_by('created_at')
+        
+        paginator = Paginator(comment_list, 5)  # 5 comments per page
+        page = self.request.GET.get("page")
+        comments = paginator.get_page(page)
+
+        context["comments"] = comments
+
         context["comment_form"] = CommentForm()
+
         return context
+    
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        # Increment view count
+        Entry.objects.filter(pk=self.object.pk).update(views=F('views') + 1)
+        self.object.refresh_from_db()
+
+        return super().get(request, *args, **kwargs)
     
     def post(self, request, *args, **kwargs):
         self.object = self.get_object()
         form = CommentForm(request.POST)
 
         if form.is_valid():
+            # Handle reply to another comment
+            parent_id = form.cleaned_data.get("parent_id")
+
             comment = Comment(
                 entry=self.object,
                 author=request.user,
                 text=form.cleaned_data["text"],
+                parent_id=parent_id if parent_id else None
             )
 
-            # Handle reply to another comment
-            parent_id = form.cleaned_data.get("parent_id")
-            if parent_id:
-                comment.parent_id = parent_id
-
             comment.save()
+
             return redirect(self.object.get_absolute_url())
 
-        context = self.get_context_data(comment_form=form)
+        context = self.get_context_data(
+            object=self.object,
+            comment_form=form
+            )
         return self.render_to_response(context)
     
 
@@ -141,15 +112,16 @@ class EntryDeleteView(UserPassesTestMixin, DeleteView):
     
 
 class SearchResultsView(ListView):
-    model = Entry
-    template_name = 'myapp/search_results.html'
-    context_object_name = 'entries'
+    # model = Entry
+    # template_name = 'myapp/search_results.html'
+    # context_object_name = 'entries'
 
-    def get_queryset(self):
-        query = self.request.GET.get('q')
-        qs = super().get_queryset()
+    # def get_queryset(self):
+    #     query = self.request.GET.get('q')
+    #     qs = super().get_queryset()
     
-        if query:
-            qs = qs.filter(title__contains=query)
+    #     if query:
+    #         qs = qs.filter(title__contains=query)
 
-        return qs
+    #     return qs
+    pass
