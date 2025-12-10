@@ -5,21 +5,32 @@ from .forms import EntryForm, CommentForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F
+from django.db.models import Count, F, Prefetch
 from django.template.loader import render_to_string
 from django.core.paginator import Paginator
+from django.core.cache import cache
 
 
 class EntryListView(LoginRequiredMixin, ListView):
     model = Entry
     template_name = 'base/base.html'
     context_object_name = 'entries'
+    paginate_by = 10
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['categories'] = Category.objects.annotate(entry_count=Count('entries'))
-        context['comments'] = Comment.objects.all()
-        context['users_count'] = Entry.objects.values('author').distinct().count()
+
+        # Cache categories with entry counts
+        cache_key = 'categories_with_counts'
+        categories = cache.get(cache_key)
+        if categories is None:
+            categories = list(Category.objects.annotate(entry_count=Count('entries')))
+            cache.set(cache_key, categories, 600)  # 10 minutes
+        context['categories'] = categories
+
+        context['comments'] = Comment.objects.select_related('entry', 'author')
+        context['users_count'] = Entry.objects.get_author_count()
+
         return context
 
 
@@ -28,66 +39,94 @@ class EntryDetailView(DetailView):
     template_name = 'myapp/detail.html'
     context_object_name = 'entry'
     
+    def get_queryset(self):
+        # Nested prefetch: replies with authors
+        replies_prefetch = Prefetch(
+            'replies',
+            queryset=Comment.objects.select_related('author').order_by('created_at')
+        )
+        
+        # Top-level comments with replies
+        comments_prefetch = Prefetch(
+            'comments',
+            queryset=Comment.objects.filter(parent__isnull=True)
+                                    .select_related('author')
+                                    .prefetch_related(replies_prefetch)
+                                    .order_by('-created_at'),
+            to_attr='top_level_comments'
+        )
+        
+        return Entry.objects.select_related('author', 'category').prefetch_related(comments_prefetch)
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        comment_list = Comment.objects.filter(
-            entry=self.object,
-            parent__isnull=True
-            ).order_by('-created_at')
-        
-        paginator = Paginator(comment_list, 5)  # 5 comments per page
+        # Use prefetched comments from Entry
+        all_comments = self.object.top_level_comments
+
+        # Paginate manually without losing prefetch objects
+        paginator = Paginator(all_comments, 5)
         page = self.request.GET.get("page", 1)
-        comments = paginator.get_page(page)
+        comments_page = paginator.get_page(page)
 
-        context["comments"] = comments
+        # Keep original prefetched objects
+        comments_page.object_list = all_comments[(comments_page.start_index()-1):comments_page.end_index()]
 
-        context.setdefault("comment_form", CommentForm())
-
+        context["comments"] = comments_page
+        context["comment_form"] = CommentForm()
         return context
     
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
-        # Increment view count
-        Entry.objects.filter(pk=self.object.pk).update(views=F('views') + 1)
-        self.object.refresh_from_db()
-
-        return super().get(request, *args, **kwargs)
+        
+        # Increment view count in cache, flush to DB periodically
+        cache_key = f'entry_views_{self.object.pk}'
+        views = cache.get(cache_key, 0)
+        cache.set(cache_key, views + 1, timeout=3600)
+        
+        # Every 10 views, flush to database
+        if views % 10 == 0:
+            Entry.objects.filter(pk=self.object.pk).update(views=F('views') + views)
+            cache.delete(cache_key)
+        
+        # Display cached + DB views
+        self.object.total_views = self.object.views + views
+        
+        context = self.get_context_data(object=self.object)
+        return self.render_to_response(context)
     
     def post(self, request, *args, **kwargs):
         self.object = self.get_object()
         form = CommentForm(request.POST)
-
+        
         if form.is_valid():
-            # Handle reply to another comment
+            comment = form.save(commit=False)
+            comment.entry = self.object
+            comment.author = request.user
+            
             parent_id = form.cleaned_data.get("parent_id")
-
-            comment = Comment(
-                entry=self.object,
-                author=request.user,
-                text=form.cleaned_data["text"],
-                parent_id=parent_id if parent_id else None
-            )
+            if parent_id:
+                comment.parent_id = parent_id
+            
             comment.save()
-            # ------------ AJAX REQUEST ------------
+            
+            # AJAX response
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                # Refresh object to get updated comments
+                self.object = self.get_object()
+                
+                # Render ONLY the comments block
                 html = render_to_string(
                     "myapp/comments_block.html",
-                    self.get_context_data(
-                        object=self.object,
-                        comment_form=CommentForm()
-                    ),
+                    {"comments": self.get_context_data()["comments"], "comment_form": CommentForm()},
                     request=request,
                 )
                 return HttpResponse(html)
-
             
             return redirect(self.object.get_absolute_url())
-
-        context = self.get_context_data(
-            object=self.object,
-            comment_form=form
-            )
+        
+        # Invalid form
+        context = self.get_context_data(comment_form=form)
         return self.render_to_response(context)
     
 

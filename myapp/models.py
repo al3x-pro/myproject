@@ -2,6 +2,7 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.template.defaultfilters import slugify
+from django.core.cache import cache
 
 User = get_user_model()
 
@@ -18,6 +19,18 @@ class Category(models.Model):
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
 
+class EntryManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().select_related('author', 'category').prefetch_related('comments')
+    
+    def get_author_count(self):
+        cache_key = 'entry_author_count'
+        count = cache.get(cache_key)
+        if count is None:
+            count = self.values('author').distinct().count()
+            cache.set(cache_key, count, 300)  # 5 minutes
+        return count
+
 
 class Entry(models.Model):
     title = models.CharField(max_length=200)
@@ -29,8 +42,15 @@ class Entry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     views = models.PositiveIntegerField(default=0)
 
+    objects = EntryManager()
+
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=['-created_at', 'author']),
+            models.Index(fields=['category']),
+            models.Index(fields=['author']),
+        ]
 
     def __str__(self):
         return self.title
@@ -51,6 +71,10 @@ class Comment(models.Model):
     
     class Meta:
         ordering = ["created_at"]
+        indexes = [
+            models.Index(fields=['entry', 'parent', '-created_at']),
+            models.Index(fields=['parent', 'created_at']),
+        ]
 
     def __str__(self):
         return f'Comment by {self.author} on {self.entry}'
