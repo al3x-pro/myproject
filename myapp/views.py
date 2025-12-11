@@ -1,7 +1,7 @@
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, get_object_or_404
-from .models import Entry, Comment, Category
-from .forms import EntryForm, CommentForm
+from .models import Entry, Category
+from .forms import EntryForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -21,14 +21,13 @@ class EntryListView(LoginRequiredMixin, ListView):
         context = super().get_context_data(**kwargs)
 
         # Cache categories with entry counts
-        cache_key = 'categories_with_counts'
-        categories = cache.get(cache_key)
-        if categories is None:
-            categories = list(Category.objects.annotate(entry_count=Count('entries')))
-            cache.set(cache_key, categories, 600)  # 10 minutes
+        categories = cache.get_or_set(
+            'categories_with_counts',
+            lambda: list(Category.objects.annotate(entry_count=Count('entries'))),
+            600  # 10 minutes
+        )
         context['categories'] = categories
 
-        context['comments'] = Comment.objects.select_related('entry', 'author')
         context['users_count'] = Entry.objects.get_author_count()
 
         return context
@@ -39,122 +38,46 @@ class EntryDetailView(DetailView):
     template_name = 'myapp/detail.html'
     context_object_name = 'entry'
     
-    def get_queryset(self):
-        # Nested prefetch: replies with authors
-        replies_prefetch = Prefetch(
-            'replies',
-            queryset=Comment.objects.select_related('author').order_by('created_at')
-        )
-        
-        # Top-level comments with replies
-        comments_prefetch = Prefetch(
-            'comments',
-            queryset=Comment.objects.filter(parent__isnull=True)
-                                    .select_related('author')
-                                    .prefetch_related(replies_prefetch)
-                                    .order_by('-created_at'),
-            to_attr='top_level_comments'
-        )
-        
-        return Entry.objects.select_related('author', 'category').prefetch_related(comments_prefetch)
-    
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
+    def get_object(self, queryset=None):
+        obj = super().get_object(queryset)
 
-        # Use prefetched comments from Entry
-        all_comments = self.object.top_level_comments
+        # Increment view count atomically
+        Entry.objects.filter(pk=obj.pk).update(views=F('views') + 1)
+        obj.refresh_from_db(fields=['views'])
 
-        # Paginate manually without losing prefetch objects
-        paginator = Paginator(all_comments, 5)
-        page = self.request.GET.get("page", 1)
-        comments_page = paginator.get_page(page)
-
-        # Keep original prefetched objects
-        comments_page.object_list = all_comments[(comments_page.start_index()-1):comments_page.end_index()]
-
-        context["comments"] = comments_page
-        context["comment_form"] = CommentForm()
-        return context
-    
-    def get(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        
-        # Increment view count in cache, flush to DB periodically
-        cache_key = f'entry_views_{self.object.pk}'
-        views = cache.get(cache_key, 0)
-        cache.set(cache_key, views + 1, timeout=3600)
-        
-        # Every 10 views, flush to database
-        if views % 10 == 0:
-            Entry.objects.filter(pk=self.object.pk).update(views=F('views') + views)
-            cache.delete(cache_key)
-        
-        # Display cached + DB views
-        self.object.total_views = self.object.views + views
-        
-        context = self.get_context_data(object=self.object)
-        return self.render_to_response(context)
-    
-    def post(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        form = CommentForm(request.POST)
-        
-        if form.is_valid():
-            comment = form.save(commit=False)
-            comment.entry = self.object
-            comment.author = request.user
-            
-            parent_id = form.cleaned_data.get("parent_id")
-            if parent_id:
-                comment.parent_id = parent_id
-            
-            comment.save()
-            
-            # AJAX response
-            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                # Refresh object to get updated comments
-                self.object = self.get_object()
-                
-                # Render ONLY the comments block
-                html = render_to_string(
-                    "myapp/comments_block.html",
-                    {"comments": self.get_context_data()["comments"], "comment_form": CommentForm()},
-                    request=request,
-                )
-                return HttpResponse(html)
-            
-            return redirect(self.object.get_absolute_url())
-        
-        # Invalid form
-        context = self.get_context_data(comment_form=form)
-        return self.render_to_response(context)
+        return obj
     
 
-class EntryCreateView(CreateView):
+class EntryCreateView(LoginRequiredMixin, CreateView):
     model = Entry
     form_class = EntryForm
     template_name = 'myapp/entry_form.html'
-    success_url = reverse_lazy('entry-list')
     extra_context = {'title': 'Create New Entry'}
 
     def form_valid(self, form):
         form.instance.author = self.request.user
+        cache.delete('categories_with_counts')
         return super().form_valid(form)
     
+    def get_success_url(self):
+        return self.object.get_absolute_url()
+    
 
-class EntryUpdateView(UserPassesTestMixin, UpdateView):
+class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Entry
     form_class = EntryForm
     template_name = 'myapp/entry_form.html'
-    success_url = reverse_lazy('entry-list')
     extra_context = {'title': 'Update Entry'}
 
     def test_func(self):
         entry = self.get_object()
         return entry.author == self.request.user
     
+    def get_success_url(self):
+        return self.object.get_absolute_url()
+    
 
-class EntryDeleteView(UserPassesTestMixin, DeleteView):
+class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     model = Entry
     template_name = 'myapp/entry_confirm_delete.html'
     success_url = reverse_lazy('entry-list')
@@ -163,120 +86,7 @@ class EntryDeleteView(UserPassesTestMixin, DeleteView):
         entry = self.get_object()
         return entry.author == self.request.user
     
-
-class SearchResultsView(ListView):
-    # model = Entry
-    # template_name = 'myapp/search_results.html'
-    # context_object_name = 'entries'
-
-    # def get_queryset(self):
-    #     query = self.request.GET.get('q')
-    #     qs = super().get_queryset()
+    def delete(self, request, *args, **kwargs):
+        cache.delete('categories_with_counts')
+        return super().delete(request, *args, **kwargs)
     
-    #     if query:
-    #         qs = qs.filter(title__contains=query)
-
-    #     return qs
-    pass
-
-
-def load_more_comments(request, entry_id):
-    entry = get_object_or_404(Entry, id=entry_id)
-    offset = int(request.GET.get("offset", 0))
-    limit = 5
-
-    comments = Comment.objects.filter(
-        entry=entry, 
-        parent__isnull=True
-    ).order_by('-created_at')[offset:offset+limit]
-
-    html = render_to_string(
-        "myapp/comments_list.html",
-        {"comments": comments, "entry": entry},
-        request=request
-    )
-
-    total_comments = Comment.objects.filter(
-        entry=entry, 
-        parent__isnull=True
-    ).count()
-    more_exist = total_comments > offset + limit
-    
-    return JsonResponse({"html": html, "more_exist": more_exist})
-
-
-def load_more_replies(request, comment_id):
-    parent_comment = get_object_or_404(Comment, id=comment_id)
-    offset = int(request.GET.get("offset", 0))
-    limit = 3
-
-    replies = parent_comment.replies.all().order_by("created_at")[offset:offset+limit]
-
-    html = render_to_string(
-        "myapp/replies_list.html",
-        {"replies": replies, "object": parent_comment.entry},
-        request=request
-    )
-
-    more_exist = parent_comment.replies.count() > offset + limit
-    return JsonResponse({"html": html, "more_exist": more_exist})
-
-
-def edit_comment(request, pk):
-    comment = get_object_or_404(Comment, pk=pk, author=request.user)
-    
-    if request.method == "POST":
-        text = request.POST.get("text", "").strip()
-        if text:
-            comment.text = text
-            comment.save()
-
-        # Get paginated comments
-        comment_list = Comment.objects.filter(
-            entry=comment.entry, 
-            parent__isnull=True
-        ).order_by("-created_at")
-        
-        paginator = Paginator(comment_list, 5)
-        page = request.GET.get("page", 1)
-        comments = paginator.get_page(page)
-
-        html = render_to_string(
-            "myapp/comments_block.html",
-            {
-                "object": comment.entry,
-                "comments": comments,
-                "comment_form": CommentForm()
-            },
-            request=request
-        )
-        return HttpResponse(html)
-    
-    return JsonResponse({"error": "Invalid request"}, status=400)
-
-
-def delete_comment(request, pk):
-    comment = get_object_or_404(Comment, pk=pk, author=request.user)
-    entry = comment.entry
-    comment.delete()
-
-    # Get paginated comments
-    comment_list = Comment.objects.filter(
-        entry=entry, 
-        parent__isnull=True
-    ).order_by("-created_at")
-    
-    paginator = Paginator(comment_list, 5)
-    page = request.GET.get("page", 1)
-    comments = paginator.get_page(page)
-
-    html = render_to_string(
-        "myapp/comments_block.html",
-        {
-            "object": entry,
-            "comments": comments,
-            "comment_form": CommentForm()
-        },
-        request=request
-    )
-    return HttpResponse(html)

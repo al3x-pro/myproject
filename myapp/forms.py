@@ -1,5 +1,5 @@
 from django import forms
-from .models import Entry, Comment
+from .models import Entry
 
 
 class EntryForm(forms.ModelForm):
@@ -11,11 +11,3 @@ class EntryForm(forms.ModelForm):
             'text': forms.Textarea(attrs={'class': 'form-control', 'placeholder': 'Write your entry here...'}),
             'category': forms.Select(attrs={'class': 'form-select'}),
         }
-
-
-class CommentForm(forms.ModelForm):
-    parent_id = forms.IntegerField(widget=forms.HiddenInput(), required=False)
-
-    class Meta:
-        model = Comment
-        fields = ["text", "parent_id"]

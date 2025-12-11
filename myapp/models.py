@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.template.defaultfilters import slugify
 from django.core.cache import cache
+from django.db.models import Count
 
 User = get_user_model()
 
@@ -21,14 +22,14 @@ class Category(models.Model):
 
 class EntryManager(models.Manager):
     def get_queryset(self):
-        return super().get_queryset().select_related('author', 'category').prefetch_related('comments')
+        return super().get_queryset().select_related('author', 'category')
     
     def get_author_count(self):
-        cache_key = 'entry_author_count'
-        count = cache.get(cache_key)
-        if count is None:
-            count = self.values('author').distinct().count()
-            cache.set(cache_key, count, 300)  # 5 minutes
+        count = cache.get_or_set(
+            'entry_author_count',
+            lambda: self.values('author').distinct().count(),
+            300  # 5 minutes
+        )
         return count
 
 
@@ -58,27 +59,3 @@ class Entry(models.Model):
     def get_absolute_url(self):
         return reverse('entry-detail', kwargs={'pk': self.pk})
 
-
-class Comment(models.Model):
-    entry = models.ForeignKey(Entry, on_delete=models.CASCADE,
-                               related_name='comments')
-    author = models.ForeignKey(User, on_delete=models.CASCADE)
-    text = models.TextField()
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-    parent = models.ForeignKey('self', null=True, blank=True,
-                                on_delete=models.CASCADE, related_name='replies')
-    
-    class Meta:
-        ordering = ["created_at"]
-        indexes = [
-            models.Index(fields=['entry', 'parent', '-created_at']),
-            models.Index(fields=['parent', 'created_at']),
-        ]
-
-    def __str__(self):
-        return f'Comment by {self.author} on {self.entry}'
-    
-    @property
-    def is_reply(self):
-        return self.parent is not None
