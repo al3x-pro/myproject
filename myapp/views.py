@@ -1,7 +1,7 @@
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, get_object_or_404
 from .models import Entry, Category
-from .forms import EntryForm
+from .forms import EntryForm, CommentForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
@@ -46,7 +46,27 @@ class EntryDetailView(DetailView):
         obj.refresh_from_db(fields=['views'])
 
         return obj
-    
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        comments = self.object.comments.all()
+        context['comments'] = comments
+        context['comment_form'] = CommentForm()
+        return context
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        form = CommentForm(request.POST)
+        if form.is_valid():
+            comment = form.save(commit=False)
+            comment.entry = self.object
+            comment.author = request.user
+            comment.save()
+            return redirect(self.object.get_absolute_url())
+        else:
+            context = self.get_context_data(object=self.object)
+            context['comment_form'] = form
+            return self.render_to_response(context)
 
 class EntryCreateView(LoginRequiredMixin, CreateView):
     model = Entry

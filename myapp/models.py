@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.template.defaultfilters import slugify
 from django.core.cache import cache
-from django.db.models import Count
+from mptt.models import MPTTModel, TreeForeignKey
 
 User = get_user_model()
 
@@ -19,6 +19,7 @@ class Category(models.Model):
         if not self.slug:
             self.slug = slugify(self.name)
         super().save(*args, **kwargs)
+
 
 class EntryManager(models.Manager):
     def get_queryset(self):
@@ -59,3 +60,19 @@ class Entry(models.Model):
     def get_absolute_url(self):
         return reverse('entry-detail', kwargs={'pk': self.pk})
 
+
+class Comment(MPTTModel):
+    entry = models.ForeignKey(Entry, on_delete=models.CASCADE,
+                               related_name='comments')
+    author = models.ForeignKey(User, on_delete=models.CASCADE)
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    parent = TreeForeignKey('self', on_delete=models.CASCADE, 
+                            null=True, blank=True,
+                            related_name='children')
+
+    class MPTTMeta:
+        order_insertion_by = ['created_at']
+
+    def __str__(self):
+        return f'Comment by {self.author} on {self.entry}'
