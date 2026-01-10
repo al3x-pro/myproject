@@ -1,5 +1,5 @@
 from django import forms
-from .models import Entry, Comment
+from .models import Entry, Comment, Category
 from mptt.forms import TreeNodeChoiceField
 
 
@@ -35,3 +35,19 @@ class CommentForm(forms.ModelForm):
                                         'placeholder': 'Add your comment here...',
                                         'label': False}),
         }
+
+
+class EntrySearchForm(forms.Form):
+    q = forms.CharField()
+    c = forms.ModelChoiceField(
+        queryset=Category.objects.all().order_by('name')
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.fields['c'].required = False
+        self.fields['q'].widget.attrs.update(
+            {'data-bs-toggle': 'dropdown',
+             'class': 'form-control menudd',}
+        )

@@ -1,14 +1,15 @@
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, get_object_or_404
+from django.shortcuts import redirect, get_object_or_404, render
 from .models import Entry, Category
-from .forms import EntryForm, CommentForm
+from .forms import EntryForm, CommentForm, EntrySearchForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F, Prefetch
+from django.db.models import Count, F, Q
 from django.template.loader import render_to_string
 from django.core.paginator import Paginator
 from django.core.cache import cache
+from django.core import serializers
 
 
 class EntryListView(LoginRequiredMixin, ListView):
@@ -68,6 +69,7 @@ class EntryDetailView(DetailView):
             context['comment_form'] = form
             return self.render_to_response(context)
 
+
 class EntryCreateView(LoginRequiredMixin, CreateView):
     model = Entry
     form_class = EntryForm
@@ -110,3 +112,40 @@ class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
         cache.delete('categories_with_counts')
         return super().delete(request, *args, **kwargs)
     
+
+def entry_search(request):
+    form = EntrySearchForm()
+    q = ''
+    c = ''
+    results = []
+    query = Q()
+
+    if request.POST.get('action') == 'post':
+        search_string = str(request.POST.get('ss'))
+
+        if search_string is not None:
+            search_string = Entry.objects.filter(
+                title__contains=search_string)[:3]
+
+            data = serializers.serialize('json', list(
+                search_string), fields=('title'))
+
+            return JsonResponse({'search_string': data}, safe=False)
+
+    if 'q' in request.GET:
+        form = EntrySearchForm(request.GET)
+        if form.is_valid():
+            q = form.cleaned_data['q']
+            c = form.cleaned_data['c']
+            
+            if c is not None:
+                query &= Q(cateory=c)
+
+            if q is not None:
+                query &= Q(title__contains=q)
+
+            results = Entry.objects.filter(query)
+
+    return render(request, 'myapp/search.html', {'form': form,
+                                                 'q':q,
+                                                 'results': results,})

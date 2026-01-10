@@ -4,6 +4,8 @@ from . import views
 urlpatterns = [
     path('', views.EntryListView.as_view(), name='entry-list'),
 
+    path('search/', views.entry_search, name='entry-search'),
+
     path('entry/<int:pk>/', views.EntryDetailView.as_view(), name='entry-detail'),
 
     path('entry/new/', views.EntryCreateView.as_view(), name='entry-create'),
