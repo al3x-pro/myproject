@@ -51,8 +51,15 @@ class EntryDetailView(DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         comments = self.object.comments.all()
+
+        fav = bool
+
+        if self.object.favourites.filter(id=self.object.pk).exists():
+            fav = True
+
         context['comments'] = comments
         context['comment_form'] = CommentForm()
+        context['fav'] = fav
         return context
 
     def post(self, request, *args, **kwargs):

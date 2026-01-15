@@ -43,6 +43,12 @@ class Entry(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     views = models.PositiveIntegerField(default=0)
+    favourites = models.ManyToManyField(
+        User, related_name="favourite", default=None, blank=True)
+    
+    likes = models.ManyToManyField(
+        User, related_name="like", default=None, blank=True)
+    like_count = models.BigIntegerField(default='0')
 
     objects = EntryManager()
 
