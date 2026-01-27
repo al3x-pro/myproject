@@ -1,6 +1,6 @@
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, get_object_or_404, render
-from .models import Entry, Category
+from .models import Entry, Category, Comment
 from .forms import EntryForm, CommentForm, EntrySearchForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
@@ -10,6 +10,9 @@ from django.template.loader import render_to_string
 from django.core.paginator import Paginator
 from django.core.cache import cache
 from django.core import serializers
+from django.views import View
+from django.utils.decorators import method_decorator
+from django.contrib.auth.decorators import login_required
 
 
 class EntryListView(LoginRequiredMixin, ListView):
@@ -50,31 +53,117 @@ class EntryDetailView(DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        comments = self.object.comments.all()
+        
+        # Get all comments for this post, ordered by tree structure
+        context['allcomments'] = Comment.objects.filter(
+            entry=self.object
+        ).select_related('author')
 
-        fav = bool
+        fav = False
+        user = self.request.user
 
-        if self.object.favourites.filter(id=self.object.pk).exists():
-            fav = True
+        if user.is_authenticated:
+            fav = self.object.favourites.filter(id=user.id).exists()
 
-        context['comments'] = comments
         context['comment_form'] = CommentForm()
         context['fav'] = fav
         return context
 
+
+class CommentAjaxView(View):
+    """
+    Handle AJAX requests for adding and deleting comments
+    """
+    @method_decorator(login_required)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
     def post(self, request, *args, **kwargs):
-        self.object = self.get_object()
-        form = CommentForm(request.POST)
-        if form.is_valid():
-            comment = form.save(commit=False)
-            comment.entry = self.object
-            comment.author = request.user
-            comment.save()
-            return redirect(self.object.get_absolute_url())
+        # Ensure this is an AJAX request
+        if not request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'error': 'This endpoint only accepts AJAX requests'
+            }, status=400)
+        
+        # Check if this is a delete action
+        if request.POST.get('action') == 'delete':
+            return self.delete_comment(request)
         else:
-            context = self.get_context_data(object=self.object)
-            context['comment_form'] = form
-            return self.render_to_response(context)
+            return self.add_comment(request)
+    
+    def delete_comment(self, request):
+        """Handle comment deletion"""
+        comment_id = request.POST.get('nodeid')
+        
+        try:
+            comment = Comment.objects.get(id=comment_id)
+            
+            # Verify the user owns this comment
+            if comment.author != request.user:
+                return JsonResponse({
+                    'error': 'You do not have permission to delete this comment'
+                }, status=403)
+            
+            comment.delete()
+            return JsonResponse({'remove': comment_id})
+            
+        except Comment.DoesNotExist:
+            return JsonResponse({
+                'error': 'Comment not found'
+            }, status=404)
+    
+    def add_comment(self, request):
+        """Handle new comment submission"""
+        # Get the data from POST
+        text = request.POST.get('text')
+        entry_id = request.POST.get('entry')
+        parent_id = request.POST.get('parent')
+        
+        # Validate required fields
+        if not text or not entry_id:
+            return JsonResponse({
+                'error': 'Missing required fields',
+                'details': 'Content and entry ID are required'
+            }, status=400)
+        
+        try:
+            # Get the entry
+            entry = Entry.objects.get(id=entry_id)
+            
+            # Create the comment
+            comment = Comment(
+                text=text,
+                author=request.user,
+                entry=entry
+            )
+            
+            # If there's a parent, set it
+            if parent_id and parent_id != '':
+                try:
+                    parent_comment = Comment.objects.get(id=parent_id)
+                    comment.parent = parent_comment
+                except Comment.DoesNotExist:
+                    return JsonResponse({
+                        'error': 'Parent comment not found'
+                    }, status=404)
+            
+            comment.save()
+            
+            return JsonResponse({
+                'result': text,
+                'user': request.user.username,
+                'id': comment.id
+            })
+            
+        except Entry.DoesNotExist:
+            return JsonResponse({
+                'error': 'Entry not found'
+            }, status=404)
+        except Exception as e:
+            return JsonResponse({
+                'error': 'An error occurred while saving the comment',
+                'details': str(e)
+            }, status=500)
 
 
 class EntryCreateView(LoginRequiredMixin, CreateView):

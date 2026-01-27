@@ -150,3 +150,5 @@ AUTHENTICATION_BACKENDS = [
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
+
+CSRF_COOKIE_HTTPONLY = False

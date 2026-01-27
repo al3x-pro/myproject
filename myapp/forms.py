@@ -15,26 +15,26 @@ class EntryForm(forms.ModelForm):
 
 
 class CommentForm(forms.ModelForm):
-    parent = TreeNodeChoiceField(queryset=Comment.objects.all())
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.fields['parent'].widget.attrs.update(
-            {'class': 'd-none'})
-        self.fields['parent'].label = ''
-        self.fields['parent'].required = False
-
-
+    """Form for creating comments"""
+    
     class Meta:
         model = Comment
-        fields = ['text', 'parent']
+        fields = ['text', 'entry', 'parent']
         widgets = {
-            'text': forms.Textarea(attrs={'class': 'form-control',
-                                        'rows': 4, 'col': 20,
-                                        'placeholder': 'Add your comment here...',
-                                        'label': False}),
+            'text': forms.Textarea(attrs={
+                'class': 'form-control',
+                'placeholder': 'Add a comment',
+                'rows': 3
+            }),
+            'entry': forms.HiddenInput(),
+            'parent': forms.HiddenInput()
         }
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['entry'].required = True
+        self.fields['parent'].required = False
+
 
 
 class EntrySearchForm(forms.Form):
