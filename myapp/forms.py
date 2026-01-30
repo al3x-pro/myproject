@@ -36,18 +36,5 @@ class CommentForm(forms.ModelForm):
         self.fields['parent'].required = False
 
 
-
 class EntrySearchForm(forms.Form):
     q = forms.CharField()
-    c = forms.ModelChoiceField(
-        queryset=Category.objects.all().order_by('name')
-    )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        self.fields['c'].required = False
-        self.fields['q'].widget.attrs.update(
-            {'data-bs-toggle': 'dropdown',
-             'class': 'form-control menudd',}
-        )

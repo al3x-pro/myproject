@@ -1,18 +1,17 @@
-from django.http import HttpResponse, JsonResponse
-from django.shortcuts import redirect, get_object_or_404, render
+from django.http import JsonResponse
+from django.shortcuts import render
 from .models import Entry, Category, Comment
 from .forms import EntryForm, CommentForm, EntrySearchForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F, Q
-from django.template.loader import render_to_string
-from django.core.paginator import Paginator
+from django.db.models import Count, F
 from django.core.cache import cache
 from django.core import serializers
 from django.views import View
 from django.utils.decorators import method_decorator
 from django.contrib.auth.decorators import login_required
+from django.contrib.postgres.search import SearchVector, SearchQuery
 
 
 class EntryListView(LoginRequiredMixin, ListView):
@@ -31,7 +30,7 @@ class EntryListView(LoginRequiredMixin, ListView):
             600  # 10 minutes
         )
         context['categories'] = categories
-
+        context['comments_count'] = Comment.objects.count()
         context['users_count'] = Entry.objects.get_author_count()
 
         return context
@@ -212,35 +211,28 @@ class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
 def entry_search(request):
     form = EntrySearchForm()
     q = ''
-    c = ''
     results = []
-    query = Q()
 
     if request.POST.get('action') == 'post':
-        search_string = str(request.POST.get('ss'))
-
-        if search_string is not None:
-            search_string = Entry.objects.filter(
-                title__contains=search_string)[:3]
-
-            data = serializers.serialize('json', list(
-                search_string), fields=('title'))
-
+        search_string = str(request.POST.get('ss', ''))
+    
+        if search_string:  # Checks for both None and empty string
+            results = Entry.objects.annotate(
+                search=SearchVector('title', 'text')
+            ).filter(search=search_string)[:3]
+            
+            data = serializers.serialize('json', list(results), fields=('title',))
             return JsonResponse({'search_string': data}, safe=False)
+        else:
+            return JsonResponse({'search_string': '[]'}, safe=False)
 
     if 'q' in request.GET:
         form = EntrySearchForm(request.GET)
         if form.is_valid():
             q = form.cleaned_data['q']
-            c = form.cleaned_data['c']
-            
-            if c is not None:
-                query &= Q(cateory=c)
 
-            if q is not None:
-                query &= Q(title__contains=q)
-
-            results = Entry.objects.filter(query)
+            results = Entry.objects.annotate(search=SearchVector(
+                'title', 'text'),).filter(search=SearchQuery(q))
 
     return render(request, 'myapp/search.html', {'form': form,
                                                  'q':q,

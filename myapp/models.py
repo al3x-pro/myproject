@@ -4,7 +4,7 @@ from django.urls import reverse
 from django.template.defaultfilters import slugify
 from django.core.cache import cache
 from mptt.models import MPTTModel, TreeForeignKey
-
+from django.db.models import Count
 User = get_user_model()
 
 
@@ -23,7 +23,7 @@ class Category(models.Model):
 
 class EntryManager(models.Manager):
     def get_queryset(self):
-        return super().get_queryset().select_related('author', 'category')
+        return super().get_queryset().select_related('author', 'category').annotate(total_comments=Count('comments', distinct=True))
     
     def get_author_count(self):
         count = cache.get_or_set(
@@ -64,7 +64,7 @@ class Entry(models.Model):
         return self.title
     
     def get_absolute_url(self):
-        return reverse('entry-detail', kwargs={'pk': self.pk})
+        return reverse('myapp:entry-detail', kwargs={'pk': self.pk})
 
 
 class Comment(MPTTModel):
