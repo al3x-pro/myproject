@@ -2,7 +2,7 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from .models import Entry, Category, Comment
 from .forms import EntryForm, CommentForm, EntrySearchForm
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView
+from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, View
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.db.models import Count, F
@@ -15,21 +15,29 @@ from django.contrib.postgres.search import SearchVector, SearchQuery
 
 
 class EntryListView(LoginRequiredMixin, ListView):
+    """
+    Entries List
+    """
     model = Entry
     template_name = 'base/base.html'
     context_object_name = 'entries'
+    ordering = ['-created_at']
     paginate_by = 10
 
+    def get_queryset(self):
+        query = super().get_queryset()
+        
+        # Simple filtering by category
+        filter_list = self.request.GET.get('category')
+        if filter_list and filter_list != 'all':
+            query = query.filter(category__slug=filter_list)
+
+        return query
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-
-        # Cache categories with entry counts
-        categories = cache.get_or_set(
-            'categories_with_counts',
-            lambda: list(Category.objects.annotate(entry_count=Count('entries'))),
-            600  # 10 minutes
-        )
-        context['categories'] = categories
+        
+        context['categories'] = Category.objects.annotate(entry_count=Count('entries'))
         context['comments_count'] = Comment.objects.count()
         context['users_count'] = Entry.objects.get_author_count()
 
@@ -37,8 +45,10 @@ class EntryListView(LoginRequiredMixin, ListView):
 
 
 class EntryDetailView(DetailView):
+    """
+    Entry Detail
+    """
     model = Entry
-    template_name = 'myapp/detail.html'
     context_object_name = 'entry'
     
     def get_object(self, queryset=None):
@@ -166,14 +176,15 @@ class CommentAjaxView(View):
 
 
 class EntryCreateView(LoginRequiredMixin, CreateView):
+    """
+    Entry Creation
+    """
     model = Entry
     form_class = EntryForm
-    template_name = 'myapp/entry_form.html'
     extra_context = {'title': 'Create New Entry'}
 
     def form_valid(self, form):
         form.instance.author = self.request.user
-        cache.delete('categories_with_counts')
         return super().form_valid(form)
     
     def get_success_url(self):
@@ -181,9 +192,11 @@ class EntryCreateView(LoginRequiredMixin, CreateView):
     
 
 class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
+    """
+    Entry Updation
+    """
     model = Entry
     form_class = EntryForm
-    template_name = 'myapp/entry_form.html'
     extra_context = {'title': 'Update Entry'}
 
     def test_func(self):
@@ -195,19 +208,28 @@ class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     
 
 class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
+    """
+    Entry Delition
+    """
     model = Entry
-    template_name = 'myapp/entry_confirm_delete.html'
-    success_url = reverse_lazy('entry-list')
+    success_url = reverse_lazy('myapp:entry-list')
 
     def test_func(self):
         entry = self.get_object()
         return entry.author == self.request.user
-    
-    def delete(self, request, *args, **kwargs):
-        cache.delete('categories_with_counts')
-        return super().delete(request, *args, **kwargs)
-    
 
+
+class SearchView(View):
+    """
+    Search Entries
+    """
+    def get(self):
+        ...
+
+    def post(self):
+        ...
+
+        
 def entry_search(request):
     form = EntrySearchForm()
     q = ''

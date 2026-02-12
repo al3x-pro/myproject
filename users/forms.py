@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth.forms import UserCreationForm, PasswordChangeForm
 from django.contrib.auth import get_user_model
+from .models import Profile
 
 
 class CustomUserCreationForm(UserCreationForm):
@@ -26,10 +27,27 @@ class CustomUserCreationForm(UserCreationForm):
     
 
 class UserProfileForm(forms.ModelForm):
+    # User fields
     username = forms.CharField(disabled=True)
     email = forms.EmailField(disabled=True)
     first_name = forms.CharField(max_length=30, required=False, help_text='Optional.')
     last_name = forms.CharField(max_length=30, required=False, help_text='Optional.')
+
+    # Profile fields
+    image = forms.ImageField(required=False)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and hasattr(self.instance, 'profile'):
+            self.fields['image'].initial = self.instance.profile.image
+
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        if commit:
+            profile, created = Profile.objects.get_or_create(user=user)
+            profile.image = self.cleaned_data.get('image', profile.image)
+            profile.save()
+        return user
 
     class Meta:
         model = get_user_model()
@@ -38,7 +56,6 @@ class UserProfileForm(forms.ModelForm):
         widgets = {
             'first_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'First Name'}),
             'last_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Last Name'}),
-            
             'email': forms.EmailInput(attrs={'class': 'form-control', 'placeholder': 'Email', 'disabled': 'disabled'}),
             'username': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'Username', 'disabled': 'disabled'}),
         }

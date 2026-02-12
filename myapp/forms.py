@@ -1,6 +1,5 @@
 from django import forms
-from .models import Entry, Comment, Category
-from mptt.forms import TreeNodeChoiceField
+from .models import Entry, Comment
 
 
 class EntryForm(forms.ModelForm):
