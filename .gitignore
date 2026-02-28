@@ -12,7 +12,8 @@ media/
 db.sqlite3
 templates/
 static/
-
+cache/
+fixtures/
 
 .vscode/
 .env

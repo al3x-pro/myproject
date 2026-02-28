@@ -1,6 +1,6 @@
 from django.http import JsonResponse
 from django.shortcuts import render
-from .models import Entry, Category, Comment
+from .models import Entry, Comment
 from .forms import EntryForm, CommentForm, EntrySearchForm
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, View
 from django.urls import reverse_lazy
@@ -22,25 +22,42 @@ class EntryListView(LoginRequiredMixin, ListView):
     template_name = 'base/base.html'
     context_object_name = 'entries'
     ordering = ['-created_at']
-    paginate_by = 10
+   
 
-    def get_queryset(self):
-        query = super().get_queryset()
+    # def get_queryset(self):
+    #     query = super().get_queryset()
         
-        # Simple filtering by category
-        filter_list = self.request.GET.get('category')
-        if filter_list and filter_list != 'all':
-            query = query.filter(category__slug=filter_list)
+    #     # Simple filtering by category
+    #     filter_list = self.request.GET.get('category')
+    #     if filter_list and filter_list != 'all':
+    #         query = query.filter(category__slug=filter_list)
 
-        return query
+    #     return query
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         
-        context['categories'] = Category.objects.annotate(entry_count=Count('entries'))
-        context['comments_count'] = Comment.objects.count()
-        context['users_count'] = Entry.objects.get_author_count()
+        context['categories'] = cache.get_or_set(
+            'categories_list',
+            lambda: [
+                {
+                    "label": Entry.Category(row["category"]).label,
+                    "count": row["count"]
+                }
+                for row in Entry.objects.values("category").annotate(count=Count("id"))
+            ],
+            timeout=60 * 15  # 15 minutes
+        )
 
+        context['totals'] = cache.get_or_set(
+            'entry_totals',
+            lambda: Entry.objects.aggregate(
+                total_users=Count('author', distinct=True),
+                total_comments=Count('comments', distinct=True),
+                total_entries=Count('id', distinct=True),
+            ),
+            300
+        )
         return context
 
 
@@ -50,16 +67,9 @@ class EntryDetailView(DetailView):
     """
     model = Entry
     context_object_name = 'entry'
+    slug_field = "public_id"
+    slug_url_kwarg = "public_id"
     
-    def get_object(self, queryset=None):
-        obj = super().get_object(queryset)
-
-        # Increment view count atomically
-        Entry.objects.filter(pk=obj.pk).update(views=F('views') + 1)
-        obj.refresh_from_db(fields=['views'])
-
-        return obj
-
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         
@@ -72,7 +82,7 @@ class EntryDetailView(DetailView):
         user = self.request.user
 
         if user.is_authenticated:
-            fav = self.object.favourites.filter(id=user.id).exists()
+            fav = self.object.favorites.filter(id=user.id).exists()
 
         context['comment_form'] = CommentForm()
         context['fav'] = fav
@@ -110,7 +120,7 @@ class CommentAjaxView(View):
             # Verify the user owns this comment
             if comment.author != request.user:
                 return JsonResponse({
-                    'error': 'You do not have permission to delete this comment'
+                'error': 'You do not have permission to delete this comment'
                 }, status=403)
             
             comment.delete()
@@ -198,6 +208,8 @@ class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Entry
     form_class = EntryForm
     extra_context = {'title': 'Update Entry'}
+    slug_field = "public_id"
+    slug_url_kwarg = "public_id"
 
     def test_func(self):
         entry = self.get_object()
@@ -213,6 +225,8 @@ class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     """
     model = Entry
     success_url = reverse_lazy('myapp:entry-list')
+    slug_field = "public_id"
+    slug_url_kwarg = "public_id"
 
     def test_func(self):
         entry = self.get_object()
@@ -243,7 +257,9 @@ def entry_search(request):
                 search=SearchVector('title', 'text')
             ).filter(search=search_string)[:3]
             
-            data = serializers.serialize('json', list(results), fields=('title',))
+            data = serializers.serialize('json', list(results),
+              fields=('title',))
+            
             return JsonResponse({'search_string': data}, safe=False)
         else:
             return JsonResponse({'search_string': '[]'}, safe=False)
