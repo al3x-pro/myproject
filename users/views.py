@@ -34,18 +34,21 @@ class UserPasswordChangeView(PasswordChangeView):
 
 
 @login_required
-def favourite_add(request, id):
-    entry = get_object_or_404(Entry, id=id)
-    if entry.favourites.filter(id=request.user.id).exists():
-        entry.favourites.remove(request.user)
+def favorite_add(request, public_id):
+    entry = get_object_or_404(Entry, public_id=public_id)
+    if entry.favorites.filter(id=request.user.id).exists():
+        entry.favorites.remove(request.user)
     else:
-        entry.favourites.add(request.user)
+        entry.favorites.add(request.user)
     return HttpResponseRedirect(request.META['HTTP_REFERER'])
 
 @login_required
 def favourite_list(request):
-    new = Entry.objects.filter(favourites=request.user)
-    return render(request, 'users/favourites.html', {'new': new})
+    new = Entry.objects.filter(favorites=request.user)
+    recent_ids = request.session.get("recent_entries", [])
+    recent_entries = Entry.objects.filter(id__in=recent_ids)
+    print(recent_entries)
+    return render(request, 'users/favorites.html', {'new': new, 'visited': recent_entries})
 
 @login_required
 def like(request):
@@ -55,13 +58,7 @@ def like(request):
         entry = get_object_or_404(Entry, id=id)
         if entry.likes.filter(id=request.user.id).exists():
             entry.likes.remove(request.user)
-            entry.like_count -= 1
-            result = entry.like_count
-            entry.save()
         else:
             entry.likes.add(request.user)
-            entry.like_count += 1
-            result = entry.like_count
-            entry.save()
-
-        return JsonResponse({'result': result,})
+        like_count = entry.likes.count()
+        return JsonResponse({'result': result,"result": like_count})

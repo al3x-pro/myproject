@@ -24,15 +24,18 @@ class EntryListView(LoginRequiredMixin, ListView):
     ordering = ['-created_at']
    
 
-    # def get_queryset(self):
-    #     query = super().get_queryset()
+    def get_queryset(self):
+        query = super().get_queryset()
         
-    #     # Simple filtering by category
-    #     filter_list = self.request.GET.get('category')
-    #     if filter_list and filter_list != 'all':
-    #         query = query.filter(category__slug=filter_list)
-
-    #     return query
+        sort = self.request.GET.get('sort', 'new')
+ 
+        if sort == 'old':
+            query = query.order_by('created_at')
+        elif sort == 'popular':
+            query = query.filter(total_comments__gt=0, total_likes__gt=0)
+        elif sort in ('HE', 'ST', 'LS'):
+            query = query.filter(category=sort)
+        return query
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -42,11 +45,12 @@ class EntryListView(LoginRequiredMixin, ListView):
             lambda: [
                 {
                     "label": Entry.Category(row["category"]).label,
-                    "count": row["count"]
+                    "count": row["count"],
+                    "name": Entry.Category(row["category"]).value
                 }
                 for row in Entry.objects.values("category").annotate(count=Count("id"))
             ],
-            timeout=60 * 15  # 15 minutes
+            timeout=60 * 15  
         )
 
         context['totals'] = cache.get_or_set(
@@ -69,6 +73,21 @@ class EntryDetailView(DetailView):
     context_object_name = 'entry'
     slug_field = "public_id"
     slug_url_kwarg = "public_id"
+
+    def get(self, request, *args, **kwargs):
+        response = super().get(request, *args, **kwargs)
+
+        entry_id = self.object.id
+        recent = request.session.get("recent_entries", [])
+
+        if entry_id in recent:
+            recent.remove(entry_id)
+
+        recent.append(entry_id)
+
+        request.session["recent_entries"] = recent
+
+        return response
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

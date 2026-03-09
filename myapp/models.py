@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.template.defaultfilters import slugify
 from mptt.models import MPTTModel, TreeForeignKey
-from django.db.models import Count
+from django.db.models import Count, When, Case, Value, CharField
 import uuid
 from django.core.validators import MinLengthValidator
 from django.core.exceptions import ValidationError
@@ -13,12 +13,15 @@ User = get_user_model()
 
 class EntryManager(models.Manager):
     def get_queryset(self):
-            return (
-            super().get_queryset()
-            .select_related('author__profile')
-            .annotate(total_comments=Count('comments', distinct=True)
-            ) 
+        return (
+        super().get_queryset()
+        .select_related('author__profile')
+        .annotate(
+            total_comments=Count('comments', distinct=True),
+            total_likes=Count('likes', distinct=True),
         )
+)
+
     
 
 class Entry(models.Model):
@@ -87,6 +90,10 @@ class Entry(models.Model):
     
     def get_absolute_url(self):
         return reverse("myapp:entry-detail", kwargs={"public_id": self.public_id})
+    
+    @property
+    def like_count(self):
+        return self.likes.count()
     
     
 
