@@ -5,7 +5,7 @@ app_name = 'myapp'
 
 urlpatterns = [
     path('', views.EntryListView.as_view(), name='entry-list'),
-    path('search/', views.entry_search, name='entry-search'),
+    path('search/', views.EntrySearchView.as_view(), name='entry-search'),
     path('entry/<uuid:public_id>/', views.EntryDetailView.as_view(), name='entry-detail'),
     path('addcomment/', views.CommentAjaxView.as_view(), name='addcomment'),
     path('entry/new/', views.EntryCreateView.as_view(), name='entry-create'),

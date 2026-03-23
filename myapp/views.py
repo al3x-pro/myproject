@@ -2,10 +2,11 @@ from django.http import JsonResponse
 from django.shortcuts import render
 from .models import Entry, Comment
 from .forms import EntryForm, CommentForm, EntrySearchForm
-from django.views.generic import ListView, DetailView, CreateView, UpdateView, DeleteView, View
+from django.views.generic import ListView, DetailView, CreateView, UpdateView \
+    , DeleteView, View, TemplateView
 from django.urls import reverse_lazy
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
-from django.db.models import Count, F
+from django.db.models import Count
 from django.core.cache import cache
 from django.core import serializers
 from django.views import View
@@ -14,97 +15,168 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.postgres.search import SearchVector, SearchQuery
 
 
+# Maximum number of recently viewed entries to keep in session
+MAX_RECENT_ENTRIES = 10
+# Maximum number of results returned by the live AJAX search
+AJAX_RESULTS_LIMIT = 3
+
+
 class EntryListView(LoginRequiredMixin, ListView):
     """
-    Entries List
+    Displays a paginated, filterable list of journal entries.
+
+    Supports sorting by recency (new/old), popularity, and category filters.
+    Category counts and aggregate totals are cached to reduce database load.
+
+    URL query params:
+        sort (str): 'new' (default) | 'old' | 'popular' | 'HE' | 'ST' | 'LS'
     """
+
     model = Entry
-    template_name = 'base/base.html'
-    context_object_name = 'entries'
-    ordering = ['-created_at']
-   
+    template_name = "base/base.html"   
+    context_object_name = "entries"
+    ordering = ["-created_at"]                  
+    paginate_by = 10                            
 
     def get_queryset(self):
-        query = super().get_queryset()
-        
-        sort = self.request.GET.get('sort', 'new')
- 
-        if sort == 'old':
-            query = query.order_by('created_at')
-        elif sort == 'popular':
-            query = query.filter(total_comments__gt=0, total_likes__gt=0)
-        elif sort in ('HE', 'ST', 'LS'):
-            query = query.filter(category=sort)
-        return query
-    
+        """
+        Returns a filtered and sorted queryset based on the 'sort' query parameter.
+
+        Filtering by category uses Entry.Category enum values (HE, ST, LS).
+        Filtering by 'popular' requires both likes and comments to be non-zero.
+        """
+        queryset = super().get_queryset()
+        sort = self.request.GET.get("sort", "new")
+
+        if sort == "old":
+            queryset = queryset.order_by("created_at")
+
+        elif sort == "new":
+            queryset = queryset.order_by("-created_at")
+
+        elif sort == "popular":
+            queryset = queryset.filter(
+                total_comments__gt=0,
+                total_likes__gt=0,
+            ).order_by("-total_likes", "-total_comments")
+
+        elif sort in ("HE", "ST", "LS"):
+            queryset = queryset.filter(category=sort)
+
+        else:
+            queryset = queryset.order_by("-created_at")
+
+        return queryset
+
     def get_context_data(self, **kwargs):
+        """
+        Extends context with:
+          - 'categories': list of dicts with label, value, and entry count per category
+          - 'totals': aggregate counts of published entries, authors, and comments
+          - 'current_sort': echoes the active sort param back to the template for UI state
+
+        Both 'categories' and 'totals' are cached to avoid repeated aggregation queries.
+        Cache TTLs: categories = 15 min, totals = 5 min.
+        """
         context = super().get_context_data(**kwargs)
-        
-        context['categories'] = cache.get_or_set(
-            'categories_list',
+
+        context["current_sort"] = self.request.GET.get("sort", "new")
+
+        # Cache category list for 15 minutes to avoid per-request aggregation
+        context["categories"] = cache.get_or_set(
+            "categories_list",
             lambda: [
                 {
                     "label": Entry.Category(row["category"]).label,
                     "count": row["count"],
-                    "name": Entry.Category(row["category"]).value
+                    "name": Entry.Category(row["category"]).value,
                 }
                 for row in Entry.objects.values("category").annotate(count=Count("id"))
             ],
-            timeout=60 * 15  
+            timeout=60 * 15,
         )
 
-        context['totals'] = cache.get_or_set(
-            'entry_totals',
-            lambda: Entry.objects.aggregate(
-                total_users=Count('author', distinct=True),
-                total_comments=Count('comments', distinct=True),
-                total_entries=Count('id', distinct=True),
+        context["totals"] = cache.get_or_set(
+            "entry_totals",
+            lambda: Entry.objects.filter(is_published=True).aggregate(
+                total_users=Count("author", distinct=True),
+                total_comments=Count("comments", distinct=True),
+                total_entries=Count("id", distinct=True),
             ),
-            300
+            timeout=60 * 5,
         )
+
         return context
 
 
 class EntryDetailView(DetailView):
     """
-    Entry Detail
+    Displays a single journal entry by its public_id slug.
+
+    Tracks recently viewed entries in the user's session (capped at
+    MAX_RECENT_ENTRIES). Provides all comments, a comment form, and
+    the authenticated user's favourite status for the entry.
+
+    URL kwargs:
+        public_id (str): the entry's public_id field used as the slug.
     """
+
     model = Entry
-    context_object_name = 'entry'
-    slug_field = "public_id"
-    slug_url_kwarg = "public_id"
+    context_object_name = "entry"
+    template_name = "myapp/entry_detail.html"
+    slug_field = "public_id"        # Look up Entry by this model field
+    slug_url_kwarg = "public_id"    # Matched from the URL pattern
+
+
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("favorites")
 
     def get(self, request, *args, **kwargs):
-        response = super().get(request, *args, **kwargs)
+        """
+        Handles GET requests and maintains a capped, ordered list of recently
+        viewed entry IDs in the session (most recent last).
 
+        Session key: 'recent_entries' — list of int entry IDs, max MAX_RECENT_ENTRIES.
+        """
+        response = super().get(request, *args, **kwargs)
         entry_id = self.object.id
+
         recent = request.session.get("recent_entries", [])
 
+        # Move entry to end (most recent) regardless of prior position
         if entry_id in recent:
             recent.remove(entry_id)
-
         recent.append(entry_id)
 
-        request.session["recent_entries"] = recent
+        request.session["recent_entries"] = recent[-MAX_RECENT_ENTRIES:]
+        request.session.modified = True
 
         return response
-    
+
     def get_context_data(self, **kwargs):
+        """
+        Extends context with:
+          - 'allcomments': threaded comments for this entry, with authors preloaded
+          - 'comment_form': blank CommentForm for posting a new comment
+          - 'fav': True if the current authenticated user has favourited this entry
+        """
         context = super().get_context_data(**kwargs)
-        
-        # Get all comments for this post, ordered by tree structure
-        context['allcomments'] = Comment.objects.filter(
-            entry=self.object
-        ).select_related('author')
 
-        fav = False
-        user = self.request.user
+        # Fetch comments with author data in one query; order for threaded display
+        context["allcomments"] = (
+            Comment.objects.filter(entry=self.object)
+            .select_related("author")
+            .order_by("parent_id", "created_at")  
+        )
 
-        if user.is_authenticated:
-            fav = self.object.favorites.filter(id=user.id).exists()
+        context["fav"] = (
+            self.request.user.is_authenticated
+            and self.object.favorites.filter(id=self.request.user.id).exists()
+        )
 
-        context['comment_form'] = CommentForm()
-        context['fav'] = fav
+        # Blank form for authenticated users to submit a new comment
+        context["comment_form"] = CommentForm()
+
         return context
 
 
@@ -206,91 +278,220 @@ class CommentAjaxView(View):
 
 class EntryCreateView(LoginRequiredMixin, CreateView):
     """
-    Entry Creation
+    Allows authenticated users to create a new journal entry.
+
+    Automatically assigns the current user as the entry's author on save.
+    Redirects to the newly created entry's detail page on success.
+
+    Access: login required — unauthenticated users are redirected to LOGIN_URL.
     """
+
     model = Entry
     form_class = EntryForm
-    extra_context = {'title': 'Create New Entry'}
+    template_name = "myapp/entry_form.html"   
+    extra_context = {"title": "Create New Entry"}
 
     def form_valid(self, form):
-        form.instance.author = self.request.user
+        """
+        Assigns the authenticated user as the author before saving.
+        """
+        obj = form.save(commit=False)
+        obj.author = self.request.user
+        obj.is_published = True
+        obj.save()
         return super().form_valid(form)
-    
+
     def get_success_url(self):
+        """
+        Redirects to the detail page of the newly created entry.
+        """
         return self.object.get_absolute_url()
     
 
 class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     """
-    Entry Updation
+    Allows the author of an entry to update it.
+
+    Access control:
+      - LoginRequiredMixin: redirects unauthenticated users to LOGIN_URL.
+      - UserPassesTestMixin: returns 403 if the logged-in user is not the author.
+
+    Uses public_id as the URL slug to avoid exposing internal PKs.
+    Redirects to the entry's detail page on success.
+
+    URL kwargs:
+        public_id (str): the entry's public_id field used as the slug.
     """
+
     model = Entry
     form_class = EntryForm
-    extra_context = {'title': 'Update Entry'}
+    template_name = "myapp/entry_form.html"      
+    extra_context = {"title": "Update Entry"}
     slug_field = "public_id"
     slug_url_kwarg = "public_id"
 
+    def get_object(self, queryset=None):
+        """
+        Fetches the entry once and caches it on the instance.
+        """
+        if not hasattr(self, "_object"):
+            self._object = super().get_object(queryset)
+        return self._object
+
     def test_func(self):
-        entry = self.get_object()
-        return entry.author == self.request.user
-    
+        """
+        Grants access only if the current user is the entry's author.
+
+        Returns True to allow, False to return a 403 Forbidden response.
+        Uses the cached get_object() to avoid an extra DB query.
+        """
+        return self.get_object().author == self.request.user
+
+    def form_valid(self, form):
+        """
+        Ensures the author field cannot be overwritten on update.
+        """
+        form.instance.author = self.request.user
+        return super().form_valid(form)
+
     def get_success_url(self):
+        """
+        Redirects to the detail page of the updated entry.
+        """
         return self.object.get_absolute_url()
     
 
 class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
     """
-    Entry Delition
+    Allows the author of an entry to permanently delete it.
+
+    Access control:
+      - LoginRequiredMixin: redirects unauthenticated users to LOGIN_URL.
+      - UserPassesTestMixin: returns 403 if the logged-in user is not the author.
+
+    Uses public_id as the URL slug to avoid exposing internal PKs.
+    Redirects to the entry list on success.
+
+    URL kwargs:
+        public_id (str): the entry's public_id field used as the slug.
     """
+
     model = Entry
-    success_url = reverse_lazy('myapp:entry-list')
+    template_name = "myapp/entry_confirm_delete.html"  
+    success_url = reverse_lazy("myapp:entry-list")
     slug_field = "public_id"
     slug_url_kwarg = "public_id"
 
+    def get_object(self, queryset=None):
+        """
+        Fetches the entry once and caches it on the instance.
+        """
+        if not hasattr(self, "_object"):
+            self._object = super().get_object(queryset)
+        return self._object
+
     def test_func(self):
-        entry = self.get_object()
-        return entry.author == self.request.user
+        """
+        Grants access only if the current user is the entry's author.
 
+        Returns True to allow, False to return a 403 Forbidden response.
+        Uses the cached get_object() to avoid an extra DB query.
+        """
+        return self.get_object().author == self.request.user
 
-class SearchView(View):
-    """
-    Search Entries
-    """
-    def get(self):
-        ...
-
-    def post(self):
-        ...
+    def form_valid(self, form):
+        """
+        Hook called on confirmed DELETE (POST to the confirm page).
+        """
+        from django.contrib import messages
+        messages.success(
+            self.request,
+            f'Entry "{self.object.title}" was deleted successfully.'
+        )
+        return super().form_valid(form)
 
         
-def entry_search(request):
-    form = EntrySearchForm()
-    q = ''
-    results = []
+class EntrySearchView(TemplateView):
+    """
+    Handles both AJAX live search and full-page search for entries.
 
-    if request.POST.get('action') == 'post':
-        search_string = str(request.POST.get('ss', ''))
-    
-        if search_string:  # Checks for both None and empty string
-            results = Entry.objects.annotate(
-                search=SearchVector('title', 'text')
-            ).filter(search=search_string)[:3]
-            
-            data = serializers.serialize('json', list(results),
-              fields=('title',))
-            
-            return JsonResponse({'search_string': data}, safe=False)
-        else:
-            return JsonResponse({'search_string': '[]'}, safe=False)
+    Two modes:
+      1. AJAX (POST, action='post'):
+         Accepts 'ss' (search string), returns up to AJAX_RESULTS_LIMIT
+         matching entry titles serialized as JSON. Used for live search UI.
 
-    if 'q' in request.GET:
-        form = EntrySearchForm(request.GET)
-        if form.is_valid():
-            q = form.cleaned_data['q']
+      2. Full-page search (GET, param 'q'):
+         Renders search.html with all matching entries and the bound form.
+         Uses PostgreSQL full-text search across title and text fields.
 
-            results = Entry.objects.annotate(search=SearchVector(
-                'title', 'text'),).filter(search=SearchQuery(q))
+    URL: myapp/search/
+    """
 
-    return render(request, 'myapp/search.html', {'form': form,
-                                                 'q':q,
-                                                 'results': results,})
+    template_name = "myapp/search.html"
+
+    def get_context_data(self, **kwargs):
+        """
+        Returns the default context with an unbound form, empty query
+        and results — used for the initial empty search page render.
+        """
+        context = super().get_context_data(**kwargs)
+        context["form"] = EntrySearchForm()
+        context["q"] = ""
+        context["results"] = []
+        return context
+
+    def get(self, request, *args, **kwargs):
+        """
+        Handles full-page search via GET param 'q'.
+
+        If 'q' is present and the form is valid, queries entries using
+        PostgreSQL full-text search across title and text fields.
+        Falls back to the empty search page if 'q' is absent or invalid.
+        """
+        context = self.get_context_data()
+
+        if "q" in request.GET:
+            form = EntrySearchForm(request.GET)
+
+            if form.is_valid():
+                q = form.cleaned_data["q"]
+
+                # select_related avoids N+1 queries when template accesses author
+                results = (
+                    Entry.objects.select_related("author")
+                    .annotate(search=SearchVector("title", "text"))
+                    .filter(search=SearchQuery(q))
+                )
+                context.update({"form": form, "q": q, "results": results})
+            else:
+                # Invalid form — return page with bound form so errors are visible
+                context["form"] = form
+
+        return render(request, self.template_name, context)
+
+    def post(self, request, *args, **kwargs):
+        """
+        Handles AJAX live search via POST with action='post'.
+
+        Expects:
+            action (str): must be 'post' to trigger AJAX mode.
+            ss (str): the search string typed by the user.
+
+        Returns:
+            JsonResponse: {'search_string': <serialized JSON>}
+        """
+        if request.POST.get("action") != "post":
+            return JsonResponse({"error": "Invalid action."}, status=400)
+
+        search_string = str(request.POST.get("ss", "")).strip()
+
+        if not search_string:
+            return JsonResponse({"search_string": "[]"}, safe=False)
+
+        results = (
+            Entry.objects.annotate(search=SearchVector("title", "text"))
+            .filter(search=SearchQuery(search_string))
+            [:AJAX_RESULTS_LIMIT]
+        )
+        data = serializers.serialize("json", list(results), fields=("title",))
+        return JsonResponse({"search_string": data}, safe=False)
