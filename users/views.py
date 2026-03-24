@@ -1,14 +1,18 @@
 from django.http import HttpResponseRedirect, JsonResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.generic import CreateView, UpdateView, TemplateView
-from django.urls import reverse_lazy
+from django.urls import reverse_lazy, reverse
 from .forms import CustomUserCreationForm, UserPasswordChangeForm, UserProfileForm
 from django.contrib.auth import get_user_model, login
 from myapp.models import Entry
 from django.contrib.auth.views import PasswordChangeView
 from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.contrib import messages
+from django.core.mail import send_mail
 from django.views import View
+from django.template.loader import render_to_string
+from datetime import datetime
+from .utils import generate_verification_token, verify_token
 
 
 class RegisterView(UserPassesTestMixin, CreateView):
@@ -43,13 +47,88 @@ class RegisterView(UserPassesTestMixin, CreateView):
         """
         Saves the new user and logs them in immediately.
         """
-        response = super().form_valid(form)
-        login(
-            self.request,
-            self.object,
-            backend="django.contrib.auth.backends.ModelBackend",
+        response = super().form_valid(form)  # saves the user → self.object
+
+        # Build and send the verification email
+        token = generate_verification_token(self.object.email)
+        verify_url = self.request.build_absolute_uri(
+            reverse("users:verify-email", kwargs={"token": token})
         )
-        return response
+        send_mail(
+            subject="Verify your email address",
+            message=f"Hi {self.object.username},\n\nClick the link below \
+            to verify your email:\n{verify_url}\n\nThe link expires in 24 hours.",
+            from_email="noreply@yoursite.com",
+            recipient_list=[self.object.email],
+        )
+
+        return redirect(reverse("users:verification-pending"))
+    
+
+def verify_email(request, token):
+    email = verify_token(token)
+
+    if email is None:
+        return render(request, "users/verification_failed.html", {
+            "reason": "This link is invalid or has expired."
+        })
+
+    User = get_user_model()
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        return render(request, "users/verification_failed.html")
+
+    # Mark profile as verified
+    profile = user.profile
+    if not profile.is_verified:
+        profile.is_verified = True
+        profile.save()
+
+    # Now log them in
+    login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+    return redirect(reverse_lazy("myapp:entry-list"))
+
+
+def verification_pending(request):
+    return render(request, "users/verification_pending.html")
+
+
+def resend_verification(request):
+    if request.method == "POST":
+        email = request.POST.get("email", "").strip()
+        User = get_user_model()
+
+        try:
+            user = User.objects.get(email=email)
+
+            if user.profile.is_verified:
+                # Already verified, just redirect them to login
+                return redirect("users:login")
+
+            token = generate_verification_token(user.email)
+            verify_url = request.build_absolute_uri(
+                reverse("users:verify-email", kwargs={"token": token})
+            )
+            html_message = render_to_string("users/verification_email.html", {
+                "user": user,
+                "verify_url": verify_url,
+                "year": datetime.now().year,
+            })
+            send_mail(
+                subject="Verify your email address",
+                message=f"Verify here: {verify_url}",
+                from_email="noreply@yoursite.com",
+                recipient_list=[user.email],
+                html_message=html_message,
+            )
+        except User.DoesNotExist:
+            pass  # Don't reveal whether the email exists
+
+        # Always redirect to pending — avoids exposing whether email was found
+        return redirect("users:verification-pending")
+
+    return render(request, "users/resend_verification.html")
 
 
 class ProfileView(LoginRequiredMixin, UpdateView):

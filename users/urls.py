@@ -5,6 +5,10 @@ app_name = 'users'
 
 urlpatterns = [
     path('register/', views.RegisterView.as_view() ,name='register'),
+    path("verify-email/<str:token>/", views.verify_email, name="verify-email"),
+    path("verify-pending/", views.verification_pending, name="verification-pending"),
+    path("resend-verification/", views.resend_verification, name="resend-verification"),
+    
     path('profile/', views.ProfileView.as_view(), name='profile'),
     path('password_change/', views.UserPasswordChangeView.as_view(), name='password_change'),
 
