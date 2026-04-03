@@ -98,6 +98,13 @@ DATABASES = {
     }
 }
 
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": BASE_DIR / "cache",
+    }
+}
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -147,13 +154,48 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_REDIRECT_URL = "/"
 
 AUTHENTICATION_BACKENDS = [
-    # 'users.authentication.EmailOrUsernameModelBackend',
     'django.contrib.auth.backends.ModelBackend',
     'users.authentication.EmailOrUsernameModelBackend',
 ]
 
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 
-SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 
 CSRF_COOKIE_HTTPONLY = False
+
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+        },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": "logs/daybook.log",
+            "maxBytes": 1024 * 1024 * 5,  # 5 MB
+            "backupCount": 3,
+            "formatter": "standard",
+        },
+    },
+    "loggers": {
+        "daybook": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["file"],
+            "level": "ERROR",
+            "propagate": False,
+        },
+    },
+}

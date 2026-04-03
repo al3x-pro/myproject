@@ -13,6 +13,8 @@ from django.views import View
 from django.utils.decorators import method_decorator
 from django.contrib.auth.decorators import login_required
 from django.contrib.postgres.search import SearchVector, SearchQuery
+from django.contrib import messages
+import logging
 
 
 # Maximum number of recently viewed entries to keep in session
@@ -20,69 +22,60 @@ MAX_RECENT_ENTRIES = 10
 # Maximum number of results returned by the live AJAX search
 AJAX_RESULTS_LIMIT = 3
 
+logger = logging.getLogger("daybook")
+
 
 class EntryListView(LoginRequiredMixin, ListView):
     """
     Displays a paginated, filterable list of journal entries.
-
     Supports sorting by recency (new/old), popularity, and category filters.
     Category counts and aggregate totals are cached to reduce database load.
-
     URL query params:
-        sort (str): 'new' (default) | 'old' | 'popular' | 'HE' | 'ST' | 'LS'
+        sort (str): 'new' (default) | 'old' | 'popular' | <Category value>
     """
-
     model = Entry
-    template_name = "base/base.html"   
+    template_name = "base/base.html"
     context_object_name = "entries"
-    ordering = ["-created_at"]                  
-    paginate_by = 10                            
-
+    ordering = ["-created_at"]
+    paginate_by = 5
+ 
     def get_queryset(self):
         """
         Returns a filtered and sorted queryset based on the 'sort' query parameter.
-
-        Filtering by category uses Entry.Category enum values (HE, ST, LS).
+        Filtering by category uses Entry.Category enum values.
         Filtering by 'popular' requires both likes and comments to be non-zero.
         """
         queryset = super().get_queryset()
         sort = self.request.GET.get("sort", "new")
-
+ 
         if sort == "old":
             queryset = queryset.order_by("created_at")
-
         elif sort == "new":
             queryset = queryset.order_by("-created_at")
-
         elif sort == "popular":
             queryset = queryset.filter(
                 total_comments__gt=0,
                 total_likes__gt=0,
             ).order_by("-total_likes", "-total_comments")
-
-        elif sort in ("HE", "ST", "LS"):
+        elif sort in Entry.Category.values:
             queryset = queryset.filter(category=sort)
-
         else:
             queryset = queryset.order_by("-created_at")
-
+ 
         return queryset
-
+ 
     def get_context_data(self, **kwargs):
         """
         Extends context with:
           - 'categories': list of dicts with label, value, and entry count per category
           - 'totals': aggregate counts of published entries, authors, and comments
           - 'current_sort': echoes the active sort param back to the template for UI state
-
         Both 'categories' and 'totals' are cached to avoid repeated aggregation queries.
         Cache TTLs: categories = 15 min, totals = 5 min.
         """
         context = super().get_context_data(**kwargs)
-
         context["current_sort"] = self.request.GET.get("sort", "new")
 
-        # Cache category list for 15 minutes to avoid per-request aggregation
         context["categories"] = cache.get_or_set(
             "categories_list",
             lambda: [
@@ -95,7 +88,7 @@ class EntryListView(LoginRequiredMixin, ListView):
             ],
             timeout=60 * 15,
         )
-
+ 
         context["totals"] = cache.get_or_set(
             "entry_totals",
             lambda: Entry.objects.filter(is_published=True).aggregate(
@@ -105,7 +98,7 @@ class EntryListView(LoginRequiredMixin, ListView):
             ),
             timeout=60 * 5,
         )
-
+ 
         return context
 
 
@@ -140,6 +133,7 @@ class EntryDetailView(DetailView):
         """
         response = super().get(request, *args, **kwargs)
         entry_id = self.object.id
+        logger.info(f"Requesting post id={kwargs.get('public_id')}")
 
         recent = request.session.get("recent_entries", [])
 
@@ -295,10 +289,10 @@ class EntryCreateView(LoginRequiredMixin, CreateView):
         """
         Assigns the authenticated user as the author before saving.
         """
-        obj = form.save(commit=False)
-        obj.author = self.request.user
-        obj.is_published = True
-        obj.save()
+        form.instance.author = self.request.user
+        form.instance.is_published = True
+        logger.info(f"Creating post title={form.cleaned_data['title']}")
+        messages.success(self.request, "Entry created successfully.")
         return super().form_valid(form)
 
     def get_success_url(self):
@@ -352,6 +346,8 @@ class EntryUpdateView(LoginRequiredMixin, UserPassesTestMixin, UpdateView):
         Ensures the author field cannot be overwritten on update.
         """
         form.instance.author = self.request.user
+        logger.info(f"Updating post id={self.object.id}")
+        messages.success(self.request, "Entry updated successfully.")
         return super().form_valid(form)
 
     def get_success_url(self):
@@ -403,7 +399,7 @@ class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
         """
         Hook called on confirmed DELETE (POST to the confirm page).
         """
-        from django.contrib import messages
+        logger.warning(f"Deleting post id={self.obj.id}")
         messages.success(
             self.request,
             f'Entry "{self.object.title}" was deleted successfully.'
@@ -493,5 +489,5 @@ class EntrySearchView(TemplateView):
             .filter(search=SearchQuery(search_string))
             [:AJAX_RESULTS_LIMIT]
         )
-        data = serializers.serialize("json", list(results), fields=("title",))
+        data = serializers.serialize("json", list(results), fields=("title", "public_id"))
         return JsonResponse({"search_string": data}, safe=False)
