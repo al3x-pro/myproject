@@ -45,7 +45,7 @@ class EntryListView(LoginRequiredMixin, ListView):
         Filtering by category uses Entry.Category enum values.
         Filtering by 'popular' requires both likes and comments to be non-zero.
         """
-        queryset = super().get_queryset()
+        queryset = Entry.published.all()
         sort = self.request.GET.get("sort", "new")
  
         if sort == "old":
@@ -84,14 +84,14 @@ class EntryListView(LoginRequiredMixin, ListView):
                     "count": row["count"],
                     "name": Entry.Category(row["category"]).value,
                 }
-                for row in Entry.objects.values("category").annotate(count=Count("id"))
+                for row in Entry.published.all().values("category").annotate(count=Count("id"))
             ],
             timeout=60 * 15,
         )
  
         context["totals"] = cache.get_or_set(
             "entry_totals",
-            lambda: Entry.objects.filter(is_published=True).aggregate(
+            lambda: Entry.published.all().aggregate(
                 total_users=Count("author", distinct=True),
                 total_comments=Count("comments", distinct=True),
                 total_entries=Count("id", distinct=True),
@@ -122,7 +122,7 @@ class EntryDetailView(DetailView):
 
 
     def get_queryset(self):
-        return super().get_queryset().prefetch_related("favorites")
+        return Entry.published.all().prefetch_related("favorites")
 
     def get(self, request, *args, **kwargs):
         """
@@ -250,7 +250,8 @@ class CommentAjaxView(View):
                     return JsonResponse({
                         'error': 'Parent comment not found'
                     }, status=404)
-            
+                
+            comment.full_clean()
             comment.save()
             
             return JsonResponse({
@@ -399,7 +400,7 @@ class EntryDeleteView(LoginRequiredMixin, UserPassesTestMixin, DeleteView):
         """
         Hook called on confirmed DELETE (POST to the confirm page).
         """
-        logger.warning(f"Deleting post id={self.obj.id}")
+        logger.warning(f"Deleting post id={self.object.id}")
         messages.success(
             self.request,
             f'Entry "{self.object.title}" was deleted successfully.'
@@ -454,7 +455,7 @@ class EntrySearchView(TemplateView):
 
                 # select_related avoids N+1 queries when template accesses author
                 results = (
-                    Entry.objects.select_related("author")
+                    Entry.published.all()
                     .annotate(search=SearchVector("title", "text"))
                     .filter(search=SearchQuery(q))
                 )
@@ -485,7 +486,7 @@ class EntrySearchView(TemplateView):
             return JsonResponse({"search_string": "[]"}, safe=False)
 
         results = (
-            Entry.objects.annotate(search=SearchVector("title", "text"))
+            Entry.published.all().annotate(search=SearchVector("title", "text"))
             .filter(search=SearchQuery(search_string))
             [:AJAX_RESULTS_LIMIT]
         )

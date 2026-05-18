@@ -182,7 +182,7 @@ class UserPasswordChangeView(LoginRequiredMixin, PasswordChangeView):
 
     template_name = "registration/password_change_form.html"
     form_class = UserPasswordChangeForm
-    success_url = reverse_lazy("users:password_change_done")
+    success_url = reverse_lazy("password_change_done")
 
     def form_valid(self, form):
         """
@@ -263,7 +263,7 @@ class FavouriteListView(LoginRequiredMixin, TemplateView):
         # Restore session visit order — filter() does not guarantee id__in order
         recent_ids = self.request.session.get("recent_entries", [])
         recent_qs = (
-            Entry.objects.filter(id__in=recent_ids)
+            Entry.published.filter(id__in=recent_ids)
             .select_related("author")
         )
 

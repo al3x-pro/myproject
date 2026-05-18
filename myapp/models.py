@@ -137,7 +137,7 @@ class Comment(MPTTModel):
         super().clean()
         if self.parent_id and self.pk and self.parent_id == self.pk:
             raise ValidationError("A comment cannot be its own parent.")
-        if self.parent and self.parent.level >= self.MAX_DEPTH:
+        if self.parent and self.parent.level >= self.MAX_DEPTH -1:
             raise ValidationError(f"Comments cannot exceed depth {self.MAX_DEPTH}.")
 
     def __str__(self):
