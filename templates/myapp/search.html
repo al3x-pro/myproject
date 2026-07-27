@@ -1,0 +1,210 @@
+{% extends 'base/base.html' %}
+
+{% block title %}Search{% endblock %}
+
+{% block content %}
+
+{% if q %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-8">
+      <h1 class="mb-3">Entries containing "{{ q }}"</h1>
+      <p class="text-muted">
+        {% with results.count as total_results %}
+        Found <strong>{{ total_results }}</strong> result{{ total_results|pluralize }}
+        {% endwith %}
+      </p>
+
+      <div class="list-group mb-4">
+        {% for entry in results %}
+        <a href="{{ entry.get_absolute_url }}" class="list-group-item list-group-item-action my-2">
+          <h5 class="mb-1">{{ entry.title }}</h5>
+        </a>
+        {% empty %}
+        <div class="alert alert-info" role="alert">
+          <i class="bi bi-info-circle me-2"></i>
+          There are no results for your query.
+        </div>
+        {% endfor %}
+      </div>
+
+      <a href="{% url 'myapp:entry-search' %}" class="btn btn-primary">
+        <i class="bi bi-arrow-left me-2"></i>New Search
+      </a>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="container py-4">
+  <div class="row justify-content-center">
+    <div class="col-lg-6">
+      <h1 class="mb-4">Search Entries</h1>
+      {# No csrf_token needed — GET form; CSRF token read from cookie for AJAX below #}
+      <form method="get" autocomplete="off">
+        <div class="position-relative mb-3">
+          <label for="id_q" class="form-label visually-hidden">Search query</label>
+          <div class="input-group">
+            <span class="input-group-text bg-white border-end-0">
+              <i class="bi bi-search" id="search-icon"></i>
+            </span>
+            <input type="text"
+                   id="id_q"
+                   name="q"
+                   class="form-control border-start-0"
+                   placeholder="Search entries..."
+                   aria-autocomplete="list"
+                   aria-controls="autocomplete-list"
+                   autofocus>
+            <button class="btn btn-outline-secondary" type="button" id="clear-btn" style="display:none;" aria-label="Clear search">
+              <i class="bi bi-x-lg"></i>
+            </button>
+          </div>
+
+          <!-- Autocomplete Dropdown -->
+          <ul class="dropdown-menu w-100 shadow-sm"
+              id="autocomplete-list"
+              role="listbox"
+              aria-label="Search suggestions">
+          </ul>
+
+          <div class="form-text">
+            <small><i class="bi bi-info-circle me-1"></i>Start typing at least 3 characters</small>
+          </div>
+        </div>
+
+        <button class="btn btn-primary w-100" type="submit" id="search-btn">
+          <i class="bi bi-search me-2"></i>Search
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(';').shift();
+  }
+
+  const searchUrl = "{% url 'myapp:entry-search' %}";
+  const entryUrlTemplate = "{% url 'myapp:entry-detail' public_id='00000000-0000-0000-0000-000000000000' %}".replace('00000000-0000-0000-0000-000000000000', '');
+
+  const searchInput = document.getElementById('id_q');
+  const autocompleteList = document.getElementById('autocomplete-list');
+  const clearBtn = document.getElementById('clear-btn');
+
+  let debounceTimer;
+  let activeIndex = -1;
+
+  function getItems() {
+    return autocompleteList.querySelectorAll('[role="option"]');
+  }
+
+  function setActive(index) {
+    const items = getItems();
+    items.forEach(item => item.classList.remove('active'));
+    if (index >= 0 && index < items.length) {
+      items[index].classList.add('active');
+      items[index].scrollIntoView({ block: 'nearest' });
+      searchInput.setAttribute('aria-activedescendant', items[index].id);
+    } else {
+      searchInput.removeAttribute('aria-activedescendant');
+    }
+    activeIndex = index;
+  }
+
+  function closeDropdown() {
+    autocompleteList.classList.remove('show');
+    activeIndex = -1;
+    searchInput.removeAttribute('aria-activedescendant');
+  }
+
+  searchInput.addEventListener('input', () => {
+    clearBtn.style.display = searchInput.value ? 'block' : 'none';
+  });
+
+  searchInput.addEventListener('keydown', function (e) {
+    const items = getItems();
+    if (!autocompleteList.classList.contains('show')) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActive(Math.min(activeIndex + 1, items.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActive(Math.max(activeIndex - 1, 0));
+    } else if (e.key === 'Enter' && activeIndex >= 0) {
+      e.preventDefault();
+      items[activeIndex].querySelector('a').click();
+    } else if (e.key === 'Escape') {
+      closeDropdown();
+    }
+  });
+
+  searchInput.addEventListener('keyup', function (e) {
+    if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(e.key)) return;
+
+    clearTimeout(debounceTimer);
+
+    if (searchInput.value.length >= 3) {
+      debounceTimer = setTimeout(() => {
+        const csrfToken = getCookie('csrftoken');
+        const formData = new URLSearchParams({ 'ss': searchInput.value, 'action': 'post' });
+        fetch(searchUrl, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-CSRFToken': csrfToken
+          }
+        })
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(json => {
+          const searchData = JSON.parse(json.search_string);
+          activeIndex = -1;
+
+          if (searchData.length) {
+            autocompleteList.innerHTML = searchData.map((item, i) =>
+              `<li role="option" id="autocomplete-option-${i}">
+                <a class="dropdown-item mb-2" href="${entryUrlTemplate}${item.fields.public_id}">
+                  ${item.fields.title}
+                </a>
+              </li>`
+            ).join('');
+          } else {
+            autocompleteList.innerHTML = '<li><span class="dropdown-item text-muted">No results found</span></li>';
+          }
+
+          autocompleteList.classList.add('show');
+        })
+        .catch(err => console.error('Autocomplete error:', err));
+      }, 300);
+    } else {
+      closeDropdown();
+    }
+  });
+
+  clearBtn.addEventListener('click', () => {
+    searchInput.value = '';
+    clearBtn.style.display = 'none';
+    closeDropdown();
+    searchInput.focus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!searchInput.contains(e.target) && !autocompleteList.contains(e.target)) {
+      closeDropdown();
+    }
+  });
+}());
+</script>
+{% endif %}
+
+{% endblock content %}

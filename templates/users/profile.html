@@ -1,0 +1,69 @@
+{% extends 'base/base.html' %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+  <!-- Redesigned entry form with cleaner card layout -->
+  <div class="section-spacing" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 100vh;">
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-lg-8">
+          <!-- Back Link -->
+          <a href="{% url 'myapp:entry-list' %}" class="btn-outline-custom px-4 mb-2"><i class="bi bi-arrow-left me-2"></i>Back to Main</a>
+
+          <!-- Form Card -->
+          <div class="card border-0 shadow-sm" style="border-radius: 16px;">
+            <!-- Header -->
+            <div class="card-header bg-white d-flex justify-content-center align-items-center">
+              <img src="{{ user.profile.image.url }}" style="width: 148px;" class="rounded-circle mx-2" alt="profile-img">
+              <h1 class="h3 fw-bold mb-1">Profile</h1>
+            </div>
+
+            <!-- Non-Field Errors -->
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger d-flex align-items-center rounded-3 mb-4">
+                <i class="bi bi-exclamation-circle-fill me-2"></i>
+                <div>
+                  {% for error in form.non_field_errors %}
+                    {{ error }}
+                  {% endfor %}
+                </div>
+              </div>
+            {% endif %}
+
+            <!-- Errors -->
+            {% if form.errors %}
+              <div class="alert alert-danger rounded-3 mb-4">
+                <div class="d-flex align-items-start gap-2">
+                  <i class="bi bi-exclamation-circle-fill mt-1"></i>
+                  <div>
+                    {% for field in form %}
+                      {% if field.errors %}
+                        <div class="small">{{ field.label }}: {{ field.errors|striptags }}</div>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                </div>
+              </div>
+            {% endif %}
+
+            <div class="card-body p-4">
+              <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                {{ form.as_p }}
+                <button type="submit" class="btn-gradient-primary px-4">Save</button>
+              </form>
+            </div>
+
+            <hr/>
+            <div>
+              <p class="px-3">
+                <a class="btn btn-gradient-success" href="{% url 'password_change' %}">Change password</a>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

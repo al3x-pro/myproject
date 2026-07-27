@@ -1,0 +1,61 @@
+{% extends 'base/base.html' %}
+
+{% block title %}Favourites{% endblock %}
+
+{% block content %}
+<div class="favourites-page">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <!-- Back Link -->
+        <a href="{% url 'myapp:entry-list' %}" class="btn-gradient-primary mb-2"><i class="bi bi-arrow-left me-2"></i>Back to Main</a>
+        <!-- Favourites List -->
+        <div id="favourites-list" role="list" aria-label="Favourite entries" class="bg-light-subtle">
+          {% if favorites %}
+          <h1>Your favorite entries:</h1>
+            {% for entry in favorites %}
+              <article class="favourite-card" data-entry-id="{{ entry.id }}" role="listitem">
+                <div class="favourite-info">
+                  <a href="{{ entry.get_absolute_url }}" class="favourite-title" title="{{ entry.title }}">
+                    {{ entry.title }}
+                  </a>
+                </div>
+                <div>
+                  <form method="post" action="{% url 'users:favorite_add' entry.public_id %}">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-link text-dark"
+                              title="remove from favorite">
+                          <i class="bi bi-bookmark-dash fs-3"></i>
+                      </button>
+                  </form>
+              </div>
+              </article>
+            {% endfor %}
+          {% else %}
+            <div class="empty-state" id="empty-state">
+              <div class="empty-state-icon">
+                <i class="bi bi-heart"></i>
+              </div>
+              <h2 class="empty-state-title">No favourites yet</h2>
+              <p class="empty-state-text">Start exploring and save entries you love for quick access later.</p>
+              <a href="{% url 'myapp:entry-list' %}" class="btn-browse"><i class="bi bi-search"></i>Browse Entries</a>
+            </div>
+          {% endif %}
+          <div>
+            <h2>Recently visited:</h2>
+            {% for entry in visited %}
+                <div class="btn-gradient-primary">
+                <a href="{{ entry.get_absolute_url }}" class="favourite-title text-white" title="{{ entry.title }}">
+                    {{ entry.title }}
+                </a>
+                </div>
+                <br>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+

@@ -1,0 +1,376 @@
+{% extends 'base/base.html' %}
+
+{% block title %}
+  Detail - {{ entry.title }}
+{% endblock %}
+
+{% block content %}
+  <div class="detail-page section-spacing">
+    <div class="container">
+      <div class="row justify-content-center">
+        <div class="col-lg-10 col-xl-8">
+          <div class="detail-card card-custom">
+
+            <!-- Header with Action Buttons -->
+            <div class="detail-header page-header mb-0" style="border-radius: 16px 16px 0 0;">
+              <div class="action-buttons page-header-content d-flex flex-wrap gap-2">
+                <a href="{% url 'myapp:entry-list' %}" class="btn-gradient-primary"><i class="bi bi-arrow-left me-2"></i>Back to Main</a>
+                {% if entry.author == request.user %}
+                <div class="ms-auto d-flex gap-2">
+                  <a href="{% url 'myapp:entry-update' entry.public_id %}" class="btn-gradient-warning"><i class="bi bi-pencil me-2"></i>Edit</a>
+                  <a href="{% url 'myapp:entry-delete' entry.public_id %}" class="btn-gradient-danger"><i class="bi bi-trash me-2"></i>Delete</a>
+                </div>
+                {% endif %}
+              </div>
+            </div>
+
+            <!-- Article Body -->
+            <div class="detail-body p-4 p-md-5 bg-white">
+              <!-- Article Title -->
+              <div class="d-flex justify-content-between">
+              <h1 class="article-title fw-bold mb-4">{{ entry.title }}</h1>
+              <div class="d-flex align-items-center">
+              {% if request.user.is_authenticated %}
+              <div class="d-flex align-items-center">
+                  <span id="like_count">{{ entry.total_likes|default:"0" }}</span>
+                  <button type="button" class="btn btn-link text-dark" id="like-button" value="{{ entry.pk }}">
+                      <i class="bi bi-hand-thumbs-up fs-3"></i>
+                  </button>
+                  <input type="hidden" id="csrf-token" value="{{ csrf_token }}">
+              </div>
+
+              <div>
+                  <form method="post" action="{% url 'users:favorite_add' entry.public_id %}">
+                      {% csrf_token %}
+                      <button type="submit" class="btn btn-link text-dark"
+                              title="{% if fav %}remove from favorite{% else %}add to favorite{% endif %}">
+                          <i class="bi bi-bookmark-{% if fav %}dash{% else %}check{% endif %} fs-3"></i>
+                      </button>
+                  </form>
+              </div>
+              {% endif %}
+              </div>
+              </div>
+              <!-- Article Meta Information -->
+              <div class="article-meta d-flex flex-wrap gap-4 p-3 mb-4 rounded-3" style="background: #f8f9fa;">
+                <div class="meta-item d-flex align-items-center gap-2">
+                  <i class="bi bi-person-circle text-primary"></i>
+                  <span><strong>Author:</strong> {{ entry.author.username }}</span>
+                </div>
+                <div class="meta-item d-flex align-items-center gap-2">
+                  <i class="bi bi-calendar text-primary"></i>
+                  <span><strong>Published:</strong> {{ entry.created_at|date:'F d, Y' }}</span>
+                </div>
+                <div class="meta-item d-flex align-items-center gap-2">
+                  <i class="bi bi-clock text-primary"></i>
+                  <span><strong>Time:</strong> {{ entry.created_at|time:'g:i A' }}</span>
+                </div>
+              </div>
+
+              <!-- Article Content -->
+              <div class="article-content p-4 mb-4 border-left-primary rounded-end" style="background: #fafbfc; font-size: 1.1rem; line-height: 1.8;">{{ entry.text|linebreaks }}</div>
+
+            </div>
+          </div>
+
+          <!-- Comment Form -->     
+            <div class="comment-form mt-4 border rounded-2 bg-white p-4">
+              <h3 class="text-center mb-3">Leave a Comment</h3>
+              <form id="main-comment-form" class="commentform" method="post">
+                {% csrf_token %}
+                <input type="hidden" name="entry" value="{{ entry.id }}">
+                <input type="hidden" name="parent" value="">
+                <div class="mb-3">
+                  <textarea name="text" cols="40" rows="3" class="form-control" placeholder="Add a comment" required id="id_text"></textarea>
+                </div>
+                <div class="d-flex flex-row-reverse">
+                  <button type="submit" class="btn-gradient-success">Submit</button>
+                </div>
+              </form> 
+            </div>
+
+            <!-- Hidden element to store entry ID for replies -->
+            <div id="thumbs" data-value="{{ entry.id }}" style="display:none;"></div>
+
+          <!-- Show or hide comments -->
+          <div class="comments-section mt-4">
+            <div class="d-flex justify-content-between mb-3">      
+              <h2>Comments ({{ entry.total_comments }})</h2> 
+              <button class="btn btn-outline-secondary" id="toggleComments">Hide comments</button>
+            </div>
+            <!-- Comment List -->
+            <div id="comments" style="display: block;">
+              {% load mptt_tags %}
+                {% recursetree allcomments %}
+                  <div class="comment p-3 mb-3 border rounded" style="background: #f1f3f5; margin-left: {{ node.level|add:"0" }}rem;" data-comment-id="{{ node.id }}" data-level="{{ node.level }}">
+                    <div class="d-flex justify-content-between">
+                      <div><strong>{{ node.author }}</strong></div>
+                      <div class="text-muted">on {{ node.created_at|date:"F d, Y H:i" }}</div>
+                    </div>
+                    <div id="comment-text-{{ node.id }}" class="mt-2">{{ node.text|linebreaks }}</div>
+                    <hr>
+                    <div class="d-flex flex-row-reverse gap-2">
+                      {% if node.level < 3 %}
+                      <button class="btn btn-primary btn-sm btn-reply-comment" data-comment-id="{{ node.id }}">Reply</button>
+                      {% endif %}
+                      {% if node.author.username == user.username %}
+                      <button class="btn btn-secondary btn-sm btn-delete-comment" data-comment-id="{{ node.id }}">Delete</button>
+                      {% endif %}
+                    </div>
+                  </div>
+                  {% if not node.is_leaf_node %}
+                    <div class="children">
+                      {{ children }}
+                    </div>
+                  {% endif %}
+                {% endrecursetree %}
+            </div>
+          </div>    
+      </div>
+    </div>
+  </div>
+
+<script>
+
+  //Escape user-supplied content before inserting into the DOM
+  function escapeHTML(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Handle all comment form submissions
+  document.addEventListener('submit', function(e) {
+    if (e.target.classList.contains('commentform')) {
+      e.preventDefault();
+      
+      const form = e.target;
+      const formData = new FormData(form);
+      
+      fetch('/addcomment/', {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then(data => {
+        const parentId = form.querySelector('[name="parent"]').value;
+        let insertPosition;
+        
+        //Determine nesting level from the parent comment's data-level attribute
+        let newLevel = 0;
+        if (parentId && parentId !== '') {
+          const parentComment = document.querySelector(`[data-comment-id="${parentId}"]`);
+          if (parentComment) {
+            insertPosition = parentComment;
+            newLevel = parseInt(parentComment.dataset.level || '0') + 1;
+          }
+        } else {
+          insertPosition = document.getElementById('comments');
+        }
+
+        const marginLeft = newLevel + 'rem';
+
+        //Escape user content; include Reply button on new comments
+        const showReplyBtn = newLevel < 3
+          ? `<button class="btn btn-primary btn-sm btn-reply-comment" data-comment-id="${data.id}">Reply</button>`
+          : '';
+
+        const commentHTML = `
+          <div class="comment p-3 mb-3 border rounded" style="background: #f1f3f5; margin-left: ${marginLeft};" data-comment-id="${data.id}" data-level="${newLevel}">
+            <div class="d-flex justify-content-between">
+              <div><strong>${escapeHTML(data.user)}</strong></div>
+              <div class="text-muted">Just now</div>
+            </div>
+            <div id="comment-text-${data.id}" class="mt-2">${escapeHTML(data.result).replace(/\n/g, '<br>')}</div>
+            <hr>
+            <div class="d-flex flex-row-reverse gap-2">
+              ${showReplyBtn}
+              <button class="btn btn-secondary btn-sm btn-delete-comment" data-comment-id="${data.id}">Delete</button>
+            </div>
+          </div>
+        `;
+        
+        if (parentId && parentId !== '') {
+          insertPosition.insertAdjacentHTML('afterend', commentHTML);
+        } else {
+          insertPosition.insertAdjacentHTML('afterbegin', commentHTML);
+        }
+        
+        form.reset();
+        
+        // Only close reply form if this submission came from it
+        if (form.id === 'reply-comment-form') {
+          closeReplyForm();
+        }
+        
+        updateCommentCount(1);
+      })
+      .catch(error => {
+        console.error('Error submitting comment:', error);
+        alert('Failed to submit comment. Please try again.');
+      });
+    }
+  });
+
+  // Event delegation for all button clicks
+  document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('btn-delete-comment')) {
+      e.preventDefault();
+      const commentId = e.target.dataset.commentId;
+      if (confirm('Are you sure you want to delete this comment?')) {
+        deleteComment(commentId);
+      }
+    }
+    
+    if (e.target.classList.contains('btn-reply-comment')) {
+      e.preventDefault();
+      const commentId = e.target.dataset.commentId;
+      showReplyForm(commentId);
+    }
+    
+    if (e.target.classList.contains('btn-close-reply')) {
+      e.preventDefault();
+      closeReplyForm();
+    }
+  });
+
+  //Accept deleted_count from server to correctly update comment count
+  function deleteComment(id) {
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    const formData = new FormData();
+    formData.append('nodeid', id);
+    formData.append('action', 'delete');
+    formData.append('csrfmiddlewaretoken', csrfToken);
+    
+    fetch('/addcomment/', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      const elementToRemove = document.querySelector(`[data-comment-id="${data.remove}"]`);
+      if (elementToRemove) {
+        elementToRemove.remove();
+        // Use server-provided deleted_count if available, otherwise fall back to -1
+        const delta = data.deleted_count ? -data.deleted_count : -1;
+        updateCommentCount(delta);
+      }
+    })
+    .catch(error => {
+      console.error('Error deleting comment:', error);
+      alert('Failed to delete comment. Please try again.');
+    });
+  }
+
+  // Helper to update the comment count heading
+  function updateCommentCount(delta) {
+    const commentCountElement = document.querySelector('h2');
+    if (commentCountElement) {
+      const match = commentCountElement.textContent.match(/\d+/);
+      const currentCount = match ? parseInt(match[0]) : 0;
+      commentCountElement.textContent = `Comments (${Math.max(0, currentCount + delta)})`;
+    }
+  }
+
+  function showReplyForm(id) {
+    closeReplyForm();
+    
+    const thumbsElement = document.getElementById('thumbs');
+    const postid = thumbsElement ? thumbsElement.getAttribute('data-value') : '';
+    
+    const targetElement = document.querySelector(`[data-comment-id="${id}"]`);
+    if (!targetElement) return;
+    
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+    
+    const formHTML = `
+      <div class="mt-3 p-3 border rounded" style="background: #fff;" id="reply-form-container">
+        <form id="reply-comment-form" class="commentform" method="post">
+          <input type="hidden" name="csrfmiddlewaretoken" value="${csrfToken}">
+          <input type="hidden" name="entry" value="${postid}">
+          <input type="hidden" name="parent" value="${id}">
+          <div class="mb-2">
+            <textarea name="text" cols="40" rows="2" class="form-control" placeholder="Add a reply" required id="id_reply_content"></textarea>
+          </div>
+          <div class="d-flex flex-row-reverse gap-2">
+            <button type="submit" class="btn btn-primary btn-sm">Submit</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm btn-close-reply">Cancel</button>
+          </div>
+        </form>
+      </div>
+    `;
+    
+    targetElement.insertAdjacentHTML('afterend', formHTML);
+    document.getElementById('id_reply_content').focus();
+  }
+
+  function closeReplyForm() {
+    const formContainer = document.getElementById("reply-form-container");
+    if (formContainer) {
+      formContainer.remove();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.commentform').forEach(form => form.reset());
+  });
+
+  //Guard against null — like button only exists for authenticated users
+  const likeButton = document.getElementById('like-button');
+  if (likeButton) {
+    likeButton.addEventListener('click', function(e) {
+      e.preventDefault();
+
+      const csrfInput = document.getElementById('csrf-token');
+      if (!csrfInput) return;
+
+      fetch('{% url "users:like" %}', {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': csrfInput.value,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          likeid: likeButton.value,
+          action: 'post'
+        })
+      })
+      .then(response => response.json())
+      .then(json => {
+        document.getElementById('like_count').innerHTML = json.like_count;
+      })
+      .catch(error => console.error('Error:', error));
+    });
+  }
+
+  // Hide or show comments
+  const toggleBtn = document.getElementById('toggleComments');
+  const comments = document.getElementById('comments');
+
+  toggleBtn.addEventListener('click', () => {
+    const isHidden = comments.style.display === 'none';
+    comments.style.display = isHidden ? 'block' : 'none';
+    toggleBtn.textContent = isHidden ? 'Hide comments' : 'Show comments';
+  });
+
+</script>
+{% endblock %}

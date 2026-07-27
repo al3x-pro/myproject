@@ -1,0 +1,65 @@
+{% extends "base/base.html" %}
+{% block form %}
+<!-- Base for Form -->
+<div class="section-spacing" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); min-height: 100vh;">
+  <div class="container">
+    <div class="row justify-content-center">
+      <div class="col-lg-8">
+        <!-- Back Link -->
+        <a href="{% url 'myapp:entry-list' %}" class="btn-gradient-primary mb-2">
+          <i class="bi bi-arrow-left me-2"></i>Back to Main
+        </a>
+        <!-- Form Card -->
+        <div class="card border-0 shadow-sm" style="border-radius: 16px;">
+          <!-- Header -->
+          <div class="card-header bg-white border-0 p-4 pb-0">
+            <h2 class="h3 fw-bold mb-1">{{ title|default:"New Entry" }}</h2>
+            <p class="text-muted mb-0">Fill in the details below to continue</p>
+          </div>
+
+          <div class="card-body p-4">
+            <!-- Unified Error Block -->
+            {% if form.errors %}
+            <div class="alert alert-danger d-flex align-items-start gap-2 rounded-3 mb-4">
+              <i class="bi bi-exclamation-circle-fill mt-1"></i>
+              <div>
+                {% if form.non_field_errors %}
+                  {% for error in form.non_field_errors %}
+                    <div>{{ error }}</div>
+                  {% endfor %}
+                {% endif %}
+                {% for field in form %}
+                  {% if field.errors %}
+                    <div class="small">{{ field.label }}: {{ field.errors|striptags }}</div>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+
+            <form method="post" enctype="multipart/form-data">
+              {% csrf_token %}
+              {% block formcontent %}
+              {% endblock formcontent %}
+              <!-- Actions -->
+              <div class="d-flex justify-content-between align-items-center pt-4 mt-3 border-top">
+                <a href="{% url 'myapp:entry-list' %}" class="btn btn-outline-secondary px-4">
+                  <i class="bi bi-x-lg me-2"></i>Cancel
+                </a>
+                <button
+                  type="submit"
+                  class="btn-gradient-success px-4"
+                  onclick="this.disabled=true; this.innerHTML='<i class=\'bi bi-hourglass-split me-2\'></i>Saving…'; this.form.submit();"
+                >
+                  <i class="bi bi-check2 me-2"></i>Submit
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock form %}

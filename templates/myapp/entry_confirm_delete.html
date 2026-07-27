@@ -1,0 +1,65 @@
+{% extends "base/base.html" %}
+
+{% block title %}Delete Entry{% endblock title %}
+
+{% block content %}
+
+<div class="section-spacing" style="min-height: 100vh; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-6">
+                <div class="delete-card">
+                    <!-- Danger Header -->
+                    <div class="delete-header">
+                        <div class="delete-icon">
+                            <i class="bi bi-exclamation-triangle"></i>
+                        </div>
+                        <h2 class="h4 fw-bold mb-0">Confirm Deletion</h2>
+                    </div>
+                    
+                    <!-- Card Body -->
+                    <div class="delete-body">
+                        <!-- Warning Message -->
+                        <div class="alert-custom alert-warning-custom" role="alert">
+                            <h5 class="fw-bold mb-2">
+                                <i class="bi bi-exclamation-circle me-2"></i>Are you sure?
+                            </h5>
+                            <p class="mb-0 small">This action cannot be undone. All data associated with this entry will be permanently removed.</p>
+                        </div>
+
+                        <!-- Entry Details -->
+                        <div class="delete-info">
+                            <h6 class="text-muted small text-uppercase mb-3">Entry Details</h6>
+                            <div class="delete-info-item">
+                                <span class="delete-info-label">
+                                    <i class="bi bi-file-earmark-text me-2"></i>Title
+                                </span>
+                                <span class="delete-info-value fw-bold">{{ entry.title }}</span>
+                            </div>
+                            <div class="delete-info-item">
+                                <span class="delete-info-label">
+                                    <i class="bi bi-calendar me-2"></i>Created
+                                </span>
+                                <span class="delete-info-value">{{ entry.created_at|date:"F d, Y" }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="d-grid gap-3">
+                                <button type="submit" class="btn-gradient-danger btn-lg">
+                                    <i class="bi bi-trash me-2"></i>Yes, Delete Permanently
+                                </button>
+                                <a href="{% url 'myapp:entry-detail' entry.public_id %}" class="btn-outline-custom btn-lg text-center">
+                                    <i class="bi bi-x-lg me-2"></i>Cancel
+                                </a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Verification Failed</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      background: #0e0e10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'DM Sans', sans-serif;
+      padding: 24px;
+    }
+
+    .card {
+      max-width: 460px;
+      width: 100%;
+      background: #16161a;
+      border: 1px solid #2a2a30;
+      border-radius: 20px;
+      padding: 56px 48px;
+      text-align: center;
+      animation: fadeUp 0.5s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .icon-wrap {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      font-size: 32px;
+      margin-bottom: 28px;
+    }
+
+    h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 26px;
+      font-weight: 400;
+      color: #f0f0ea;
+      margin-bottom: 14px;
+    }
+
+    .reason {
+      display: inline-block;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      font-size: 13px;
+      padding: 8px 16px;
+      border-radius: 20px;
+      margin-bottom: 24px;
+    }
+
+    p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: #808088;
+      margin-bottom: 32px;
+    }
+
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .btn-primary {
+      display: block;
+      padding: 13px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 500;
+    }
+
+    .btn-secondary {
+      display: block;
+      padding: 13px;
+      background: transparent;
+      border: 1px solid #2a2a30;
+      color: #a0a0a8;
+      text-decoration: none;
+      border-radius: 10px;
+      font-size: 15px;
+    }
+
+    .btn-secondary:hover { border-color: #404048; color: #c0c0c8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-wrap">✕</div>
+
+    <h1>Verification failed</h1>
+    <span class="reason">{{ reason|default:"Invalid or expired link" }}</span>
+
+    <p>
+      This can happen if the link has expired (links are valid for 24 hours),
+      or if it has already been used. Request a new one below.
+    </p>
+
+    <div class="actions">
+      <a href="{% url 'myapp:resend-verification' %}" class="btn-primary">
+        Request a new link
+      </a>
+      <a href="{% url 'myapp:register' %}" class="btn-secondary">
+        Back to register
+      </a>
+    </div>
+  </div>
+</body>
+</html>

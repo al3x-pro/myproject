@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Check your email</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      min-height: 100vh;
+      background: #0e0e10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'DM Sans', sans-serif;
+      padding: 24px;
+    }
+
+    .card {
+      max-width: 480px;
+      width: 100%;
+      background: #16161a;
+      border: 1px solid #2a2a30;
+      border-radius: 20px;
+      padding: 56px 48px;
+      text-align: center;
+      animation: fadeUp 0.5s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .icon-ring {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 80px; height: 80px;
+      margin-bottom: 32px;
+    }
+
+    .icon-ring::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(#6366f1, #8b5cf6, #6366f1);
+      animation: spin 3s linear infinite;
+      opacity: 0.5;
+    }
+
+    .icon-ring::after {
+      content: '';
+      position: absolute;
+      inset: 3px;
+      border-radius: 50%;
+      background: #16161a;
+    }
+
+    .icon-ring .emoji {
+      position: relative;
+      z-index: 1;
+      font-size: 32px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    h1 {
+      font-family: 'DM Serif Display', serif;
+      font-size: 28px;
+      font-weight: 400;
+      color: #f0f0ea;
+      margin-bottom: 16px;
+      letter-spacing: -0.3px;
+    }
+
+    p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: #808088;
+      margin-bottom: 12px;
+    }
+
+    p strong { color: #c0c0c8; }
+
+    .steps {
+      margin: 32px 0;
+      text-align: left;
+      background: #1a1a1e;
+      border: 1px solid #2a2a30;
+      border-radius: 12px;
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 14px;
+      color: #a0a0a8;
+    }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 500;
+      color: #fff;
+    }
+
+    .resend-link {
+      font-size: 13px;
+      color: #505058;
+      margin-top: 8px;
+    }
+
+    .resend-link a {
+      color: #6366f1;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-ring">
+      <span class="emoji">✉️</span>
+    </div>
+
+    <h1>Check your inbox</h1>
+    <p>We've sent a verification link to <strong>{{ user.email }}</strong>.</p>
+    <p>Click the link in that email to activate your account.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        Open your email app
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        Find the email from <strong>noreply@yourapp.com</strong>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        Click <em>"Verify my email"</em>
+      </div>
+    </div>
+
+    <p class="resend-link">
+      Didn't receive it? Check your spam folder or
+      <a href="{% url 'users:resend-verification' %}">resend the email</a>.
+    </p>
+  </div>
+</body>
+</html>
